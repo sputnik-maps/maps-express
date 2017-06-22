@@ -29,8 +29,6 @@ public:
                                        std::function<void(render_result_t&&)> success_callback,
                                        std::function<void()> error_callback = std::function<void()>());
 
-    bool RenderSync(std::unique_ptr<RenderRequest>, render_result_t& output);
-
     std::shared_ptr<RenderTask> MakeSubtile(std::unique_ptr<SubtileRequest> request,
                                             std::function<void(render_result_t&&)> success_callback,
                                             std::function<void()> error_callback = std::function<void()>());

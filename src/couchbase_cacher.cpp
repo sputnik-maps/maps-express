@@ -1,5 +1,7 @@
 #include "couchbase_cacher.h"
 
+#include <folly/io/async/EventBaseManager.h>
+
 #include <glog/logging.h>
 
 
@@ -90,12 +92,23 @@ void CouchbaseCacher::Touch(const std::string& key, std::chrono::seconds expire_
 
 bool CouchbaseCacher::LockUntilSet(const std::vector<std::string>& keys) {
     bool locked = false;
-    std::lock_guard<std::mutex> lock(mux_);
-    for (const std::string& key : keys) {
-        if (set_waiters_.find(key) == set_waiters_.end()) {
-            set_waiters_[key] = {};
-            locked = true;
+    std::vector<std::string> locked_keys;
+    locked_keys.reserve(keys.size());
+    {
+        std::lock_guard<std::mutex> lock(mux_);
+        for (const std::string& key : keys) {
+            if (set_waiters_.find(key) == set_waiters_.end()) {
+                set_waiters_[key] = {};
+                locked = true;
+                locked_keys.push_back(key);
+            }
         }
+    }
+    if (locked) {
+        folly::EventBase* evb = folly::EventBaseManager::get()->getExistingEventBase();
+        evb->runAfterDelay([this, locked_keys = std::move(locked_keys)]{
+            Unlock(locked_keys);
+        }, 20000);
     }
     return locked;
 }
@@ -107,7 +120,7 @@ void CouchbaseCacher::Unlock(const std::vector<std::string>& keys) {
             std::lock_guard<std::mutex> lock(mux_);
             auto set_waiters_itr = set_waiters_.find(key);
             if (set_waiters_itr == set_waiters_.end()) {
-                return;
+                continue;
             }
             waiters = std::move(set_waiters_itr->second);
             set_waiters_.erase(set_waiters_itr);
@@ -156,11 +169,20 @@ void CouchbaseCacher::OnRetrieveError(const std::string& key) {
 }
 
 void CouchbaseCacher::OnTileSet(const std::string& key) {
-    std::lock_guard<std::mutex> lock(mux_);
-    tmp_cache_.erase(key);
+    folly::EventBase* evb = folly::EventBaseManager::get()->getExistingEventBase();
+    if (evb) {
+        evb->runAfterDelay([this, key]{
+            std::lock_guard<std::mutex> lock(mux_);
+            tmp_cache_.erase(key);
+        }, 60000);
+    } else {
+        std::lock_guard<std::mutex> lock(mux_);
+        tmp_cache_.erase(key);
+    }
 }
 
 void CouchbaseCacher::OnSetError(const std::string& key) {
+    // TODO: add retry logic
     std::lock_guard<std::mutex> lock(mux_);
     tmp_cache_.erase(key);
 }

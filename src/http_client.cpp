@@ -10,6 +10,8 @@
 #include <proxygen/lib/http/session/HTTPTransaction.h>
 #include <proxygen/lib/http/session/HTTPUpstreamSession.h>
 
+#include "session_wrapper.h"
+
 // TODO: handle task cancellation
 
 static const uint16_t kMaxReconnects = 3u;
@@ -63,7 +65,7 @@ public:
     }
 
     inline bool connected() const noexcept {
-        return session_ != nullptr;
+        return bool(session_);
     }
 
 private:
@@ -82,7 +84,7 @@ private:
     uint16_t port_;
 
     std::unique_ptr<RequestInfo> request_info_;
-    HTTPUpstreamSession* session_{nullptr};
+    SessionWrapper session_;
     proxygen::HTTPTransaction* txn_{nullptr};
     uint16_t num_reconnects_{0};
 
@@ -197,7 +199,7 @@ bool HTTPWorker::Request(std::unique_ptr<RequestInfo> request_info) {
     }
     request_info_ = std::move(request_info);
     if (session_ && !session_->isClosing()) {
-        SendRequest(session_);
+        SendRequest(session_.get());
     } else {
         Connect();
     }
@@ -207,11 +209,7 @@ bool HTTPWorker::Request(std::unique_ptr<RequestInfo> request_info) {
 void HTTPWorker::CancelWork() {
     // TODO: maybe add something else...
     if (txn_) {
-
-    }
-    if (session_) {
-        session_->notifyPendingShutdown();
-        session_ = nullptr;
+        txn_->sendAbort();
     }
     connector_.reset();
 }
@@ -223,14 +221,13 @@ void HTTPWorker::connectSuccess(HTTPUpstreamSession* session) {
         SendRequest(session);
     }
     if (hold_connection_) {
-        session_ = session;
+        session_ = SessionWrapper(session);
     } else {
         session->closeWhenIdle();
     }
 }
 
 void HTTPWorker::connectError(const folly::AsyncSocketException& ex) {
-    session_ = nullptr;
     LOG(ERROR) << ex.what();
     if (num_reconnects_ < kMaxReconnects) {
         ++num_reconnects_;

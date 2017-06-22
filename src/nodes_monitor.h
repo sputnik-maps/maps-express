@@ -7,12 +7,13 @@
 
 class NodesMonitor {
 public:
-    using addr_vec_t = std::vector<folly::SocketAddress>;
+    using addr_entry_t = std::pair<folly::SocketAddress, bool>;
+    using addr_vec_t = std::vector<addr_entry_t>;
 
     NodesMonitor(const std::string& host, uint port, std::shared_ptr<EtcdClient> etcd_client);
     ~NodesMonitor();
 
-    std::shared_ptr<const addr_vec_t> GetActiveNodes();
+    std::shared_ptr<const addr_vec_t> GetActiveNodes() const;
 
     void Register();
     void Unregister();

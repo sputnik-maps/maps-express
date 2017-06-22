@@ -227,7 +227,7 @@ static std::pair<EtcdUpdate, EtcdError> ProcessWatch(http_response_ptr response)
     std::string action = jaction.asString();
     if (action == "set") {
         etcd_update.type = EtcdUpdate::Type::set;
-    } else if (action == "delete") {
+    } else if (action == "delete" || action == "expire") {
         etcd_update.type = EtcdUpdate::Type::remove;
     } else if (action == "update") {
         etcd_update.type = EtcdUpdate::Type::update;

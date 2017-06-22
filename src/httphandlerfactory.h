@@ -1,5 +1,7 @@
 #pragma once
 
+#include <folly/ThreadLocal.h>
+
 #include <proxygen/lib/http/HTTPMessage.h>
 #include <proxygen/httpserver/RequestHandlerFactory.h>
 #include <proxygen/httpserver/RequestHandler.h>
@@ -32,13 +34,18 @@ public:
     using endpoint_t = std::vector<std::shared_ptr<EndpointParams>>;
 
 private:
+    using endpoints_map_t = std::unordered_map<std::string, endpoint_t>;
+    struct TimerWrapper {
+        folly::HHWheelTimer::UniquePtr timer;
+    };
+
     std::shared_ptr<StatusMonitor> monitor_;
     RenderManager render_manager_;
     DataManager data_manager_;
-    using endpoints_map_t = std::unordered_map<std::string, endpoint_t>;
     std::shared_ptr<endpoints_map_t> endpoints_;
+    std::shared_ptr<TileCacher> cacher_;
     std::unique_ptr<ServerUpdateObserver> update_observer_;
-    std::unique_ptr<TileCacher> cacher_;
+    folly::ThreadLocal<TimerWrapper> timer_;
     Config& config_;
     NodesMonitor* nodes_monitor_{nullptr};
     bool allow_style_updates_{false};

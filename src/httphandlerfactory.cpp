@@ -27,7 +27,8 @@ private:
 };
 
 
-static std::shared_ptr<endpoints_map_t> ParseEndpoints(const Json::Value jendpoints) {
+static std::shared_ptr<endpoints_map_t> ParseEndpoints(const Json::Value jendpoints,
+                                                       DataManager& data_manager) {
     if (!jendpoints.isObject()) {
         return nullptr;
     }
@@ -46,14 +47,23 @@ static std::shared_ptr<endpoints_map_t> ParseEndpoints(const Json::Value jendpoi
             params->minzoom = FromJson<int>(jparams["minzoom"], 0);
             params->maxzoom = FromJson<int>(jparams["maxzoom"], 19);
             params->zoom_offset = FromJson<int>(jparams["data_zoom_offset"], 0);
-            params->provider_name = FromJson<std::string>(jparams["data_provider"], "");
+            std::string provider_name = FromJson<std::string>(jparams["data_provider"], "");
+            if (!provider_name.empty()) {
+                auto data_provider = data_manager.GetProvider(provider_name);
+                if (!data_provider) {
+                    LOG(ERROR) << "Data provider \"" << provider_name << "\" for endpoint \""
+                               << endpoint_path << "\" not found!";
+                    continue;
+                }
+                params->data_provider = std::move(data_provider);
+            }
             params->style_name = FromJson<std::string>(jparams["style"], "");
             params->allow_layers_query = FromJson<bool>(jparams["allow_layers_query"], false);
             std::string type = FromJson<std::string>(jparams["type"], "static");
             if (type == "static") {
                 params->type = EndpointType::static_files;
-                if (params->provider_name.empty()) {
-                    LOG(ERROR) << "No loader name for endpoint '" << endpoint_path << "' provided!";
+                if (!params->data_provider) {
+                    LOG(ERROR) << "No data provider for endpoint '" << endpoint_path << "' specified!";
                     continue;
                 }
             } else if (type == "render") {
@@ -70,8 +80,8 @@ static std::shared_ptr<endpoints_map_t> ParseEndpoints(const Json::Value jendpoi
                 }
             } else if (type == "mvt") {
                 params->type = EndpointType::mvt;
-                if (params->provider_name.empty()) {
-                    LOG(ERROR) << "No loader name for endpoint '" << endpoint_path << "' provided!";
+                if (!params->data_provider) {
+                    LOG(ERROR) << "No data provider for endpoint '" << endpoint_path << "' specified!";
                     continue;
                 }
                 const std::string filter_map_path = FromJson<std::string>(jparams["filter_map"], "");
@@ -85,7 +95,7 @@ static std::shared_ptr<endpoints_map_t> ParseEndpoints(const Json::Value jendpoi
             const Json::Value& jmetatile_size = jparams["metatile_size"];
             if (jmetatile_size.isString()) {
                 if (jmetatile_size.asString() == "auto") {
-                    if (params->provider_name.empty()) {
+                    if (!params->data_provider) {
                         LOG(ERROR) << "Auto metatile size can be used only with data provider!";
                     } else {
                         params->auto_metatile_size = true;
@@ -120,7 +130,7 @@ HttpHandlerFactory::HttpHandlerFactory(Config& config, std::shared_ptr<StatusMon
     const Json::Value& jserver = *jserver_ptr;
 
     const Json::Value& jendpoints = jserver["endpoints"];
-    auto endpoints_ptr = ParseEndpoints(jendpoints);
+    auto endpoints_ptr = ParseEndpoints(jendpoints, data_manager_);
     if (!endpoints_ptr || endpoints_ptr->empty()) {
         LOG(WARNING) << "No endpoints provided";
     }
@@ -142,7 +152,7 @@ HttpHandlerFactory::HttpHandlerFactory(Config& config, std::shared_ptr<StatusMon
             std::string user = FromJson<std::string>(jcacher["user"], "");
             std::string password = FromJson<std::string>(jcacher["password"], "");
             uint num_workers = FromJson<uint>(jcacher["workers"], 2);
-            cacher_ = std::make_unique<CouchbaseCacher>(hosts, user, password, num_workers);
+            cacher_ = std::make_shared<CouchbaseCacher>(hosts, user, password, num_workers);
         };
     }
     if (!cacher_) {
@@ -153,6 +163,11 @@ HttpHandlerFactory::HttpHandlerFactory(Config& config, std::shared_ptr<StatusMon
 HttpHandlerFactory::~HttpHandlerFactory() {}
 
 void HttpHandlerFactory::onServerStart(folly::EventBase* evb) noexcept {
+    timer_->timer = folly::HHWheelTimer::newTimer(
+                evb,
+                std::chrono::milliseconds(folly::HHWheelTimer::DEFAULT_TICK_INTERVAL),
+                folly::AsyncTimeout::InternalEnum::NORMAL,
+                std::chrono::seconds(20));
     if (nodes_monitor_) {
         nodes_monitor_->Register();
     }
@@ -176,12 +191,13 @@ proxygen::RequestHandler* HttpHandlerFactory::onRequest(proxygen::RequestHandler
         return new MonHandler(monitor_);
     }
     auto endpoints = std::atomic_load(&endpoints_);
-    return new TileHandler(render_manager_, data_manager_, endpoints, cacher_.get());
+    return new TileHandler(*timer_->timer, std::make_shared<TileProcessor>(render_manager_), endpoints,
+                           cacher_, nodes_monitor_);
 }
 
 
 bool HttpHandlerFactory::UpdateConfig(std::shared_ptr<Json::Value> update) {
-    auto endpoints_map = ParseEndpoints((*update)["endpoints"]);
+    auto endpoints_map = ParseEndpoints((*update)["endpoints"], data_manager_);
     if (!endpoints_map) {
         return false;
     }

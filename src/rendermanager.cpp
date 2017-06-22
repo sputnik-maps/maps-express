@@ -121,11 +121,6 @@ std::shared_ptr<RenderTask> RenderManager::Render(std::unique_ptr<RenderRequest>
     return task;
 }
 
-bool RenderManager::RenderSync(std::unique_ptr<RenderRequest>, render_result_t& output) {
-    // TODO
-    return false;
-}
-
 std::shared_ptr<RenderTask> RenderManager::MakeSubtile(std::unique_ptr<SubtileRequest> request,
                                                        std::function<void (render_result_t&&)> success_callback,
                                                        std::function<void ()> error_callback) {

@@ -34,8 +34,8 @@ static const std::string kHelpStr = R"help(
 Maps Express.
 
 Usage:
-    maps-express <host> json <json-config-path>
-    maps-express <host> etcd <etcd-host>
+    maps-express <host>:<port> [--internal-port <port>] json <json-config-path>
+    maps-express <host>:<port> [--internal-port <port>] etcd <etcd-host>
 )help";
 
 namespace {
@@ -115,8 +115,34 @@ int main(int argc, char* argv[]) {
     if (argc < 4) {
         PrintHelpAndExit();
     }
-    const std::string host = argv[1];
+    const std::string host_port = argv[1];
     const std::string config_type = argv[2];
+
+    auto del_pos = host_port.find(':');
+    if (del_pos == host_port.npos) {
+        PrintHelpAndExit();
+    }
+    const std::string host = host_port.substr(0, del_pos);
+    uint http_port;
+    try {
+        http_port = static_cast<uint>(std::stoi(host_port.substr(del_pos + 1)));
+    } catch (...) {
+        PrintHelpAndExit();
+    }
+
+    uint internal_http_port;
+    if (std::string(argv[3]) == "--internal-port") {
+        if (argc < 6) {
+            PrintHelpAndExit();
+        }
+        try {
+            internal_http_port = static_cast<uint>(std::stoi(argv[4]));
+        } catch (...) {
+            PrintHelpAndExit();
+        }
+    } else {
+        internal_http_port = http_port + 1;
+    }
 
     std::unique_ptr<JsonConfig> json_config;
     std::unique_ptr<EtcdHelper> etcd_helper;
@@ -125,7 +151,7 @@ int main(int argc, char* argv[]) {
         json_config = std::make_unique<JsonConfig>(argv[3]);
         config = json_config.get();
     } else if (config_type == "etcd") {
-        etcd_helper = std::make_unique<EtcdHelper>(argv[3], host, kDefaultPort);
+        etcd_helper = std::make_unique<EtcdHelper>(argv[3], host, internal_http_port);
         config = &etcd_helper->config;
     } else {
         std::cout << "Invlid config type: " << config_type << "\n" << std::endl;
@@ -148,13 +174,6 @@ int main(int argc, char* argv[]) {
     const Json::Value& japp = *japp_ptr;
     FLAGS_log_dir = japp["log_dir"].asString().c_str();
 
-    std::shared_ptr<const Json::Value> jserver_ptr = config->GetValue("server");
-    assert(jserver_ptr);
-    const Json::Value& jserver = *jserver_ptr;
-
-    uint http_port = FromJson<uint>(jserver["port"], kDefaultPort);
-    uint internal_http_port = FromJson<uint>(jserver["internal_port"], kDefaultPort + 1);
-
     std::vector<HTTPServer::IPConfig> IPs = {
         {SocketAddress(host, static_cast<std::uint16_t>(http_port), true), Protocol::HTTP},
         {SocketAddress(host, static_cast<std::uint16_t>(internal_http_port), true), Protocol::HTTP},
@@ -168,7 +187,7 @@ int main(int argc, char* argv[]) {
 
     proxygen::HTTPServerOptions options;
     options.threads = std::thread::hardware_concurrency();
-    options.idleTimeout = std::chrono::milliseconds(60000);
+    options.idleTimeout = std::chrono::milliseconds(20000);
     options.shutdownOn = {SIGINT, SIGTERM};
     options.enableContentCompression = true;
     options.contentCompressionLevel = 5;

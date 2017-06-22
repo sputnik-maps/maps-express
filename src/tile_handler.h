@@ -2,74 +2,65 @@
 
 #include <mapnik/config.hpp>
 
-#include <folly/Memory.h>
+#include <folly/io/IOBuf.h>
 
 #include "async_task_handler.h"
-#include "data_manager.h"
 #include "endpoint.h"
-#include "rendermanager.h"
+#include "nodes_monitor.h"
+#include "proxy_handler.h"
 #include "status_monitor.h"
 #include "tile.h"
 #include "tile_cacher.h"
+#include "tile_processor.h"
 #include "util.h"
 
-class TileHandler : public AsyncTaskHandler {
+class ProxyHandler;
+
+class TileHandler : public AsyncTaskHandler, public ProxyHandler::Callbacks {
 public:
     using endpoint_t =  std::vector<std::shared_ptr<EndpointParams>>;
     using endpoints_map_t = std::unordered_map<std::string, endpoint_t>;
 
-    explicit TileHandler(RenderManager& render_manager,
-                         DataManager& datd_manager,
+    explicit TileHandler(folly::HHWheelTimer& timer,
+                         std::shared_ptr<TileProcessor> tile_processor,
                          std::shared_ptr<const endpoints_map_t> endpoints,
-                         TileCacher* cacher = nullptr);
+                         std::shared_ptr<TileCacher> cacher = nullptr,
+                         NodesMonitor* nodes_monitor = nullptr);
+
+    ~TileHandler();
 
     void onRequest(std::unique_ptr<proxygen::HTTPMessage> headers) noexcept override;
     void onBody(std::unique_ptr<folly::IOBuf> body) noexcept override;
     void onSuccessEOM() noexcept override;
 
-    void OnCachedTileLoaded(std::shared_ptr<CachedTile> tile) noexcept;
-    void OnCacherError() noexcept;
-
-    void OnLoadSuccess(Tile&& tile) noexcept;
-    void OnLoadError(LoadError err) noexcept;
-
-    void OnRenderingSuccess(Metatile&& metatile) noexcept;
-
-    void OnProcessingSuccess(std::string&& tile_data) noexcept;
-    void OnProcessingError() noexcept;
+    void OnProxyEom() noexcept;
+    void OnProxyError() noexcept;
 
 private:
-    using ExtensionType = util::ExtensionType;
-
-    virtual void OnErrorSent(std::uint16_t err_code) noexcept override;
-
-    bool CheckParams() noexcept;
-    std::experimental::optional<MetatileId> GetMetatileId() noexcept;
-    void LoadFromCacheOrGenerate() noexcept;
-    void LoadFromCacheOrError(const std::string& key) noexcept;
+    void TryLoadFromCache() noexcept;
+    void ProxyToOtherNode(const folly::SocketAddress& addr) noexcept;
     void GenerateTile() noexcept;
-    void LoadTile() noexcept;
-    void ProcessRender() noexcept;
-    void ProcessMvt() noexcept;
-    void UnlockCache() noexcept;
+    void LockCacheAndGenerateTile();
+    void LoadFromCacheOrError();
+    void SendResponse(std::string tile_data) noexcept;
 
-    RenderManager& rm_;
-    DataManager& dm_;
-    std::unique_ptr<folly::IOBuf> response_body_;
+    std::shared_ptr<TileProcessor> tile_processor_;
     std::shared_ptr<const endpoints_map_t> endpoints_;
-    TileCacher* cacher_{nullptr};
+    std::shared_ptr<TileCacher> cacher_;
+    std::unique_ptr<proxygen::HTTPMessage> headers_;
+    std::unique_ptr<ProxyHandler> proxy_handler_;
+    folly::HHWheelTimer& timer_;
+    NodesMonitor* nodes_monitor_{nullptr};
+
 
     std::vector<std::string> locked_cache_keys_;
-    TileId tile_id_;
-    std::set<std::string> tags_;
-    std::experimental::optional<MetatileId> metatile_id_;
-    std::shared_ptr<EndpointParams> endpoint_params_;
-    std::shared_ptr<DataProvider> data_provider_;
-    std::shared_ptr<Tile> data_tile_;
-    std::unique_ptr<std::set<std::string>> layers_;
-    std::string data_version_;
+    std::shared_ptr<TileRequest> tile_request_;
+    std::shared_ptr<AsyncTaskBase> pending_work_;
+    std::string request_info_str_;
     std::string buffer_;
-    std::string request_info_;
-    ExtensionType ext_{ExtensionType::none};
+    util::ExtensionType ext_{util::ExtensionType::none};
     bool save_to_cache_{false};
+    bool is_internal_request_{false};
+
+    friend class ProxyHandler;
 };

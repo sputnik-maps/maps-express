@@ -55,7 +55,11 @@ public:
     MetatileId() = default;
 
     MetatileId(const TileId& id, uint size = 1) {
-        FromTileId(id, size, size);
+        if (size == 1) {
+            lt_tile_ = id;
+        } else {
+            FromTileId(id, size, size);
+        }
     }
 
     MetatileId(const TileId& id, uint width, uint height) {

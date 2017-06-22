@@ -6,6 +6,7 @@
 
 
 class FilterTable;
+class DataProvider;
 
 enum class EndpointType : uint8_t {
     static_files,
@@ -15,8 +16,8 @@ enum class EndpointType : uint8_t {
 
 struct EndpointParams {
     std::shared_ptr<FilterTable> filter_table;
+    std::shared_ptr<DataProvider> data_provider;
     std::string style_name;
-    std::string provider_name;
     std::string utfgrid_key;
     uint minzoom;
     uint maxzoom;
