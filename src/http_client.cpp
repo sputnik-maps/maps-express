@@ -50,7 +50,7 @@ public:
     void connectError(const folly::AsyncSocketException& ex) override;
 
     void setTransaction(proxygen::HTTPTransaction* txn) noexcept override {}
-    void detachTransaction() noexcept override {}
+    void detachTransaction() noexcept override;
     void onHeadersComplete(std::unique_ptr<proxygen::HTTPMessage> msg) noexcept override;
     void onBody(std::unique_ptr<folly::IOBuf> chain) noexcept override;
     void onTrailers(std::unique_ptr<proxygen::HTTPHeaders> trailers) noexcept override {}
@@ -125,7 +125,11 @@ HTTPWorker::HTTPWorker(folly::EventBase& evb, folly::HHWheelTimer& timer,
 }
 
 HTTPWorker::~HTTPWorker() {
-    CancelWork();
+    if (txn_) {
+        txn_->sendAbort();
+        txn_ = nullptr;
+    }
+    connector_.reset();
 }
 
 void HTTPWorker::Connect() {
@@ -206,14 +210,6 @@ bool HTTPWorker::Request(std::unique_ptr<RequestInfo> request_info) {
     return true;
 }
 
-void HTTPWorker::CancelWork() {
-    // TODO: maybe add something else...
-    if (txn_) {
-        txn_->sendAbort();
-    }
-    connector_.reset();
-}
-
 
 void HTTPWorker::connectSuccess(HTTPUpstreamSession* session) {
     num_reconnects_ = 0;
@@ -242,6 +238,9 @@ void HTTPWorker::connectError(const folly::AsyncSocketException& ex) {
     MaybeProcessNextRequest();
 }
 
+void HTTPWorker::detachTransaction() noexcept {
+    txn_ = nullptr;
+}
 
 void HTTPWorker::onHeadersComplete(std::unique_ptr<proxygen::HTTPMessage> msg) noexcept {
     assert(request_info_);
@@ -267,10 +266,11 @@ void HTTPWorker::onEOM() noexcept {
 }
 
 void HTTPWorker::onError(const proxygen::HTTPException& error) noexcept {
-    assert(request_info_);
-    LOG(WARNING) << error.what();
-    request_info_->async_task->NotifyError();
-    request_info_.reset();
+    if (request_info_) {
+        LOG(WARNING) << error.what();
+        request_info_->async_task->NotifyError();
+        request_info_.reset();
+    }
     MaybeProcessNextRequest();
 }
 
@@ -317,18 +317,15 @@ HTTPClient::HTTPClient(folly::EventBase& evb, const std::string& host, uint16_t 
 }
 
 HTTPClient::~HTTPClient() {
-    // TODO: Avoid multiple calls
     Shutdown();
 }
 
 void HTTPClient::Shutdown() {
+    if (stopped_) {
+        return;
+    }
     evb_.runImmediatelyOrRunInEventBaseThreadAndWait([this]{
-        if (stopped_) {
-            return;
-        }
-        for (auto& wrk : workers_pool_) {
-            wrk->CancelWork();
-        }
+        workers_pool_.clear();
         for (auto& request_info : pending_requests_) {
             request_info->async_task->NotifyError();
         }
@@ -339,7 +336,10 @@ void HTTPClient::Shutdown() {
 
 void HTTPClient::Request(http_task_ptr async_task, proxygen::HTTPMethod method, const std::string& url,
                          const proxygen::HTTPHeaders* headers, std::unique_ptr<folly::IOBuf> body) {
-
+    if (stopped_) {
+        async_task->NotifyError();
+        return;
+    }
     auto request_info = std::make_unique<RequestInfo>();
     request_info->async_task = std::move(async_task);
     HTTPMessage& request= request_info->request;
@@ -369,6 +369,9 @@ void HTTPClient::Request(http_task_ptr async_task, proxygen::HTTPMethod method, 
 http_response_ptr HTTPClient::RequestAndWait(proxygen::HTTPMethod method, const std::string& url,
                                              const proxygen::HTTPHeaders* headers,
                                              std::unique_ptr<folly::IOBuf> body) {
+    if (stopped_) {
+        return nullptr;
+    }
     if (evb_.isInEventBaseThread()) {
         LOG(ERROR) << "HTTPClient::RequestAndWait called from HTTPClient's thread!";
         return nullptr;

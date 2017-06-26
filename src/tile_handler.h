@@ -21,7 +21,8 @@ public:
     using endpoint_t =  std::vector<std::shared_ptr<EndpointParams>>;
     using endpoints_map_t = std::unordered_map<std::string, endpoint_t>;
 
-    explicit TileHandler(folly::HHWheelTimer& timer,
+    explicit TileHandler(const std::string& internal_port,
+                         folly::HHWheelTimer& timer,
                          std::shared_ptr<TileProcessor> tile_processor,
                          std::shared_ptr<const endpoints_map_t> endpoints,
                          std::shared_ptr<TileCacher> cacher = nullptr,
@@ -33,8 +34,8 @@ public:
     void onBody(std::unique_ptr<folly::IOBuf> body) noexcept override;
     void onSuccessEOM() noexcept override;
 
-    void OnProxyEom() noexcept;
-    void OnProxyError() noexcept;
+    void OnProxyEom() noexcept override;
+    void OnProxyError() noexcept override;
 
 private:
     void TryLoadFromCache() noexcept;
@@ -58,6 +59,7 @@ private:
     std::shared_ptr<AsyncTaskBase> pending_work_;
     std::string request_info_str_;
     std::string buffer_;
+    std::string internal_port_;
     util::ExtensionType ext_{util::ExtensionType::none};
     bool save_to_cache_{false};
     bool is_internal_request_{false};

@@ -192,7 +192,7 @@ int main(int argc, char* argv[]) {
     options.enableContentCompression = true;
     options.contentCompressionLevel = 5;
     options.handlerFactories = proxygen::RequestHandlerChain()
-        .addThen<HttpHandlerFactory>(*config, monitor, nodes_monitor)
+        .addThen<HttpHandlerFactory>(*config, monitor, std::to_string(internal_http_port), nodes_monitor)
         .build();
 
     LOG(INFO) << "starting... " << japp["name"].asString() << " " << japp["version"].asString() << std::endl;

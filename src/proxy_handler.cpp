@@ -13,6 +13,7 @@ ProxyHandler::ProxyHandler(Callbacks& callbacks, folly::HHWheelTimer& timer,
         downstream_(downstream)
 {
     assert(headers_);
+    headers_->setDstAddress(addr);
     downstream_.pauseIngress();
     const folly::AsyncSocket::OptionMap opts{
         {{SOL_SOCKET, SO_REUSEADDR}, 1}};

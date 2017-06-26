@@ -1,12 +1,3 @@
-/*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
- *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
- */
 #pragma once
 
 #include <proxygen/lib/http/session/HTTPUpstreamSession.h>
@@ -20,9 +11,24 @@ public:
         session_->setInfoCallback(this);
     }
 
+    SessionWrapper(const SessionWrapper&) = delete;
+    SessionWrapper& operator=(const SessionWrapper&) = delete;
+
+    SessionWrapper& operator=(SessionWrapper&& other) {
+        if (session_) {
+            session_->drain();
+        }
+        session_ = other.session_;
+        other.session_ = nullptr;
+        if (session_) {
+            session_->setInfoCallback(this);
+        }
+        return *this;
+    }
+
     ~SessionWrapper() {
         if (session_) {
-          session_->drain();
+            session_->drain();
         }
     }
 

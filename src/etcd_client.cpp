@@ -37,7 +37,7 @@ void EtcdClient::Shutdown() {
     }
     // If we own EventBase and client, stop them
     if (loop_thread_.get_id() != std::thread::id()) {
-        http_client_->Shutdown();
+        http_client_.reset();
         evb_.terminateLoopSoon();
         loop_thread_.join();
     }

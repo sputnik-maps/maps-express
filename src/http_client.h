@@ -48,5 +48,5 @@ private:
     folly::HHWheelTimer::UniquePtr timer_;
     std::string host_;
     uint16_t port_;
-    bool stopped_{false};
+    std::atomic_bool stopped_{false};
 };

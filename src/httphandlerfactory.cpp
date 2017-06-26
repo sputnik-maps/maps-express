@@ -117,10 +117,11 @@ static std::shared_ptr<endpoints_map_t> ParseEndpoints(const Json::Value jendpoi
 }
 
 HttpHandlerFactory::HttpHandlerFactory(Config& config, std::shared_ptr<StatusMonitor> monitor,
-                                       NodesMonitor* nodes_monitor) :
+                                       std::string internal_port, NodesMonitor* nodes_monitor) :
         monitor_(std::move(monitor)),
         render_manager_(config),
         data_manager_(config),
+        internal_port_(std::move(internal_port)),
         config_(config),
         nodes_monitor_(nodes_monitor)
 {
@@ -177,6 +178,7 @@ void HttpHandlerFactory::onServerStop() noexcept {
     if (nodes_monitor_) {
         nodes_monitor_->Unregister();
     }
+    timer_->timer.reset();
 }
 
 proxygen::RequestHandler* HttpHandlerFactory::onRequest(proxygen::RequestHandler*,
@@ -191,8 +193,8 @@ proxygen::RequestHandler* HttpHandlerFactory::onRequest(proxygen::RequestHandler
         return new MonHandler(monitor_);
     }
     auto endpoints = std::atomic_load(&endpoints_);
-    return new TileHandler(*timer_->timer, std::make_shared<TileProcessor>(render_manager_), endpoints,
-                           cacher_, nodes_monitor_);
+    return new TileHandler(internal_port_, *timer_->timer, std::make_shared<TileProcessor>(render_manager_),
+                           endpoints, cacher_, nodes_monitor_);
 }
 
 

@@ -97,9 +97,8 @@ static inline bool CheckParams(const TileId& tile_id, ExtensionType ext,
     return true;
 }
 
-static inline bool IsInternalRequest(HTTPMessage& headers) {
-    // TMP
-    return headers.getDstPort() == "8081";
+static inline bool IsInternalRequest(HTTPMessage& headers, const std::string& internal_port) {
+    return headers.getDstPort() == internal_port;
 }
 
 static optional<folly::SocketAddress> GetRenderNodeAddr(const NodesMonitor& monitor, const MetatileId& metatile_id) {
@@ -108,7 +107,8 @@ static optional<folly::SocketAddress> GetRenderNodeAddr(const NodesMonitor& moni
         return nullopt;
     }
     const TileId lt_tile_id = metatile_id.left_top();
-    int i = (lt_tile_id.x + lt_tile_id.y) % nodes_vec->size();
+    int i = (lt_tile_id.x ^ lt_tile_id.y ^ lt_tile_id.y ^
+             metatile_id.width() ^ metatile_id.height()) % nodes_vec->size();
     const NodesMonitor::addr_entry_t& addr_entry = (*nodes_vec)[i];
     if (addr_entry.second) {
         // Current node
@@ -118,7 +118,8 @@ static optional<folly::SocketAddress> GetRenderNodeAddr(const NodesMonitor& moni
 }
 
 
-TileHandler::TileHandler(folly::HHWheelTimer& timer,
+TileHandler::TileHandler(const std::string& internal_port,
+                         folly::HHWheelTimer& timer,
                          std::shared_ptr<TileProcessor> tile_processor,
                          std::shared_ptr<const endpoints_map_t> endpoints,
                          std::shared_ptr<TileCacher> cacher,
@@ -127,7 +128,8 @@ TileHandler::TileHandler(folly::HHWheelTimer& timer,
         endpoints_(std::move(endpoints)),
         cacher_(std::move(cacher)),
         timer_(timer),
-        nodes_monitor_(nodes_monitor) {
+        nodes_monitor_(nodes_monitor),
+        internal_port_(internal_port) {
     assert(tile_processor_);
 }
 
@@ -259,7 +261,7 @@ void TileHandler::onRequest(std::unique_ptr<HTTPMessage> headers) noexcept {
 
     if (cacher_) {
         request_info_str_ = MakeRequestInfoStr(*tile_request_, ext_str);
-        is_internal_request_ = IsInternalRequest(*headers_);
+        is_internal_request_ = IsInternalRequest(*headers_, internal_port_);
         TryLoadFromCache();
     } else {
         GenerateTile();
@@ -423,6 +425,8 @@ void TileHandler::SendResponse(std::string tile_data) noexcept {
         rb.header("Content-Type", "text/html");
     }
     rb.header("access-control-allow-origin", "*");
+    // DBG
+    rb.header("dbg-node-port", internal_port_);
     buffer_ = std::move(tile_data);
     rb.body(folly::IOBuf::wrapBuffer(buffer_.data(), buffer_.size()));
     rb.sendWithEOM();

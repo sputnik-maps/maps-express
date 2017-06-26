@@ -20,6 +20,7 @@ class ServerUpdateObserver;
 class HttpHandlerFactory : public proxygen::RequestHandlerFactory {
 public:
     explicit HttpHandlerFactory(Config& config, std::shared_ptr<StatusMonitor> monitor,
+                                std::string internal_port,
                                 NodesMonitor* nodes_monitor = nullptr);
     ~HttpHandlerFactory();
 
@@ -46,6 +47,7 @@ private:
     std::shared_ptr<TileCacher> cacher_;
     std::unique_ptr<ServerUpdateObserver> update_observer_;
     folly::ThreadLocal<TimerWrapper> timer_;
+    std::string internal_port_;
     Config& config_;
     NodesMonitor* nodes_monitor_{nullptr};
     bool allow_style_updates_{false};
