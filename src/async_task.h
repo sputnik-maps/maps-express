@@ -33,6 +33,7 @@ public:
     virtual bool cancel() = 0;
 };
 
+
 template <typename Res = void, typename Err = void>
 class AsyncTask : public AsyncTaskBase {
 public:
@@ -46,7 +47,8 @@ public:
     AsyncTask() = default;
 
     explicit AsyncTask(result_cb_t success_callback, bool cb_in_event_base_thread = false) :
-                  success_callback_(std::move(success_callback)) {
+                  success_callback_(std::move(success_callback)),
+                  status_(std::make_shared<std::atomic<TaskStatus>>(TaskStatus::pending)) {
         if (cb_in_event_base_thread) {
             evb_ = GetEventBase();
         }
@@ -56,7 +58,8 @@ public:
                        error_cb_t error_callback,
                        bool cb_in_event_base_thread = false) :
                   success_callback_(std::move(success_callback)),
-                  error_callback_(std::move(error_callback)) {
+                  error_callback_(std::move(error_callback)),
+                  status_(std::make_shared<std::atomic<TaskStatus>>(TaskStatus::pending)) {
         if (cb_in_event_base_thread) {
             evb_ = GetEventBase();
         }
@@ -65,26 +68,25 @@ public:
     virtual ~AsyncTask() {}
 
     template <typename ...Args>
-    bool SetResult(Args&&... arg) {
+    void SetResult(Args&&... arg) {
         return SetDone<Res>(success_callback_, std::forward<Args>(arg)...);
     }
 
     template <typename ...Args>
-    bool NotifyError(Args&&... arg) {
+    void NotifyError(Args&&... arg) {
         return SetDone<Err>(error_callback_, std::forward<Args>(arg)...);
     }
 
     inline bool finished() const noexcept {
-        return status_ != TaskStatus::pending;
+        return *status_ != TaskStatus::pending;
     }
 
     inline bool cancelled() const noexcept {
-        return status_ == TaskStatus::cancelled;
+        return *status_ == TaskStatus::cancelled;
     }
 
     inline bool cancel() noexcept override {
-        auto expected_status = TaskStatus::pending;
-        return status_.compare_exchange_strong(expected_status, TaskStatus::cancelled);
+        return SetStatus(TaskStatus::cancelled);
     }
 
 private:
@@ -94,26 +96,39 @@ private:
         cancelled
     };
 
-    template <typename T, typename CB, typename ...Args>
-    inline bool SetDone(CB& callback, Args&&... args) {
+
+    static inline bool SetStatus(std::atomic<TaskStatus>& status, TaskStatus new_status) {
         auto expected_status = TaskStatus::pending;
-        if (status_.compare_exchange_strong(expected_status, TaskStatus::done)) {
-            if (callback) {
-                InvokeCallback<T>(callback, std::forward<Args>(args)...);
-            }
-            return true;
+        return status.compare_exchange_strong(expected_status, new_status);
+    }
+
+    inline bool SetStatus(TaskStatus status) {
+        return SetStatus(*status_, status);
+    }
+
+    template <typename T, typename CB, typename ...Args>
+    inline void SetDone(CB& callback, Args&&... args) {
+        if (callback) {
+            InvokeCallback<T>(callback, std::forward<Args>(args)...);
+        } else {
+            SetStatus(TaskStatus::done);
         }
-        return false;
     }
 
     template <typename T, typename CB>
     inline typename std::enable_if<!std::is_same<CB, std::function<void()>>::value>::type
     InvokeCallback(CB& callback, T arg) {
         if (evb_) {
-            RunInEventBaseThread(evb_, [cb = std::move(callback), arg = std::move(arg)]
-                                        () mutable { cb(std::forward<T>(arg)); });
+            RunInEventBaseThread(evb_, [current_status = status_, cb = std::move(callback),
+                                        arg = std::move(arg)] () mutable {
+                if (SetStatus(*current_status, TaskStatus::done)) {
+                    cb(std::forward<T>(arg));
+                }
+            });
         } else {
-            callback(std::forward<T>(arg));
+            if (SetStatus(TaskStatus::done)) {
+                callback(std::forward<T>(arg));
+            }
         }
     }
 
@@ -121,14 +136,20 @@ private:
     inline typename std::enable_if<std::is_same<CB, std::function<void()>>::value>::type
     InvokeCallback(CB& callback) {
         if (evb_) {
-            RunInEventBaseThread(evb_, std::move(callback));
+            RunInEventBaseThread(evb_, [current_status = status_, cb = std::move(callback)] () mutable {
+                if (SetStatus(*current_status, TaskStatus::done)) {
+                    cb();
+                }
+            });
         } else {
-            callback();
+            if (SetStatus(TaskStatus::done)) {
+                callback();
+            }
         }
     }
 
     result_cb_t success_callback_;
     error_cb_t error_callback_;
+    std::shared_ptr<std::atomic<TaskStatus>> status_;
     folly::EventBase* evb_{nullptr};
-    std::atomic<TaskStatus> status_{TaskStatus::pending};
 };

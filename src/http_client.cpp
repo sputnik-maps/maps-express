@@ -133,10 +133,7 @@ HTTPWorker::~HTTPWorker() {
 }
 
 void HTTPWorker::Connect() {
-    // TODO: maybe redundant check
-    if (connector_.isBusy()) {
-        connector_.reset();
-    }
+    connector_.reset();
     connector_.connect(&evb_, addr_, std::chrono::milliseconds(1000));
 }
 

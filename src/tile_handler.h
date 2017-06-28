@@ -21,6 +21,20 @@ public:
     using endpoint_t =  std::vector<std::shared_ptr<EndpointParams>>;
     using endpoints_map_t = std::unordered_map<std::string, endpoint_t>;
 
+    class ConnectionTimeoutCb : public folly::HHWheelTimer::Callback {
+    public:
+        ConnectionTimeoutCb(TileHandler& parent) : parent_(parent) {}
+
+        virtual void timeoutExpired() noexcept override {
+            parent_.OnConnectionTimeout();
+        }
+
+        void callbackCanceled() noexcept override {}
+
+    private:
+        TileHandler& parent_;
+    };
+
     explicit TileHandler(const std::string& internal_port,
                          folly::HHWheelTimer& timer,
                          std::shared_ptr<TileProcessor> tile_processor,
@@ -36,6 +50,9 @@ public:
 
     void OnProxyEom() noexcept override;
     void OnProxyError() noexcept override;
+    void OnProxyConnectError() noexcept override;
+
+    void OnConnectionTimeout() noexcept;
 
 private:
     void TryLoadFromCache() noexcept;
@@ -51,10 +68,9 @@ private:
     std::unique_ptr<proxygen::HTTPMessage> headers_;
     std::unique_ptr<ProxyHandler> proxy_handler_;
     folly::HHWheelTimer& timer_;
+    ConnectionTimeoutCb connection_timeout_cb_;
     NodesMonitor* nodes_monitor_{nullptr};
 
-
-    std::vector<std::string> locked_cache_keys_;
     std::shared_ptr<TileRequest> tile_request_;
     std::shared_ptr<AsyncTaskBase> pending_work_;
     std::string request_info_str_;

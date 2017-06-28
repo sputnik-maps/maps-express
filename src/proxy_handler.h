@@ -13,6 +13,7 @@ public:
     public:
         virtual void OnProxyEom() noexcept = 0;
         virtual void OnProxyError() noexcept = 0;
+        virtual void OnProxyConnectError() noexcept = 0;
     };
 
     explicit ProxyHandler(Callbacks& callbacks, folly::HHWheelTimer& timer,
@@ -20,7 +21,13 @@ public:
                           proxygen::ResponseHandler& downstream);
     ~ProxyHandler();
 
+    inline bool headers_sent() const noexcept {
+        return headers_sent_;
+    }
+
 private:
+    void Connect();
+
     void connectSuccess(proxygen::HTTPUpstreamSession* session) override;
     void connectError(const folly::AsyncSocketException& ex) override;
 
@@ -36,10 +43,13 @@ private:
     void onEgressResumed() noexcept override;
 
     proxygen::HTTPConnector connector_;
+    folly::SocketAddress addr_;
     std::unique_ptr<proxygen::HTTPMessage> headers_;
     proxygen::HTTPTransaction* txn_{nullptr};
     SessionWrapper session_;
     Callbacks& callbacks_;
     folly::HHWheelTimer& timer_;
     proxygen::ResponseHandler& downstream_;
+    uint num_reconnects_{0};
+    bool headers_sent_{false};
 };

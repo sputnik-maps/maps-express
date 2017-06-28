@@ -3,10 +3,13 @@
 #include <folly/io/async/EventBaseManager.h>
 
 
+static const uint kMaxReconnects = 3;
+
 ProxyHandler::ProxyHandler(Callbacks& callbacks, folly::HHWheelTimer& timer,
                       const folly::SocketAddress& addr, std::unique_ptr<proxygen::HTTPMessage> headers,
                       proxygen::ResponseHandler& downstream) :
         connector_(this, &timer),
+        addr_(addr),
         headers_(std::move(headers)),
         callbacks_(callbacks),
         timer_(timer),
@@ -14,17 +17,21 @@ ProxyHandler::ProxyHandler(Callbacks& callbacks, folly::HHWheelTimer& timer,
 {
     assert(headers_);
     headers_->setDstAddress(addr);
-    downstream_.pauseIngress();
-    const folly::AsyncSocket::OptionMap opts{
-        {{SOL_SOCKET, SO_REUSEADDR}, 1}};
-    connector_.connect(folly::EventBaseManager::get()->getEventBase(), addr,
-                       std::chrono::seconds(20), opts);
+    Connect();
 }
 
 ProxyHandler::~ProxyHandler() {
     if (txn_) {
         txn_->sendAbort();
     }
+}
+
+void ProxyHandler::Connect() {
+    const folly::AsyncSocket::OptionMap opts{
+        {{SOL_SOCKET, SO_REUSEADDR}, 1}};
+    connector_.reset();
+    connector_.connect(folly::EventBaseManager::get()->getEventBase(), addr_,
+                       std::chrono::seconds(20), opts);
 }
 
 void ProxyHandler::connectSuccess(proxygen::HTTPUpstreamSession* session) {
@@ -37,13 +44,17 @@ void ProxyHandler::connectSuccess(proxygen::HTTPUpstreamSession* session) {
         return;
     }
     txn_->sendHeadersWithEOM(*headers_);
-    downstream_.resumeIngress();
+    headers_sent_ = true;
 }
 
 void ProxyHandler::connectError(const folly::AsyncSocketException& ex) {
-    // TODO: maybe add reconnection logic
     LOG(ERROR) << ex;
-    callbacks_.OnProxyError();
+    if (num_reconnects_ < kMaxReconnects) {
+        ++num_reconnects_;
+        Connect();
+    } else {
+        callbacks_.OnProxyConnectError();
+    }
 }
 
 void ProxyHandler::setTransaction(proxygen::HTTPTransaction* txn) noexcept {}

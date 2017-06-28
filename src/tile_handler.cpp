@@ -23,6 +23,9 @@ using std::experimental::nullopt;
 using HTTPMessage = proxygen::HTTPMessage;
 using HTTPMethod = proxygen::HTTPMethod;
 
+
+static const auto kConnectionTimeout = std::chrono::seconds(20);
+
 static std::string MakeCacherKey(const TileId& id, const std::string& info_str) {
     std::string key;
     key.append(std::to_string(id.x));
@@ -117,7 +120,6 @@ static optional<folly::SocketAddress> GetRenderNodeAddr(const NodesMonitor& moni
     return addr_entry.first;
 }
 
-
 TileHandler::TileHandler(const std::string& internal_port,
                          folly::HHWheelTimer& timer,
                          std::shared_ptr<TileProcessor> tile_processor,
@@ -128,6 +130,7 @@ TileHandler::TileHandler(const std::string& internal_port,
         endpoints_(std::move(endpoints)),
         cacher_(std::move(cacher)),
         timer_(timer),
+        connection_timeout_cb_(*this),
         nodes_monitor_(nodes_monitor),
         internal_port_(internal_port) {
     assert(tile_processor_);
@@ -137,14 +140,32 @@ TileHandler::~TileHandler() {
     if (pending_work_) {
         pending_work_->cancel();
     }
-    // TODO eliminate duplicate unlock!
-    if (!locked_cache_keys_.empty()) {
-        cacher_->Unlock(locked_cache_keys_);
+}
+
+void TileHandler::OnConnectionTimeout() noexcept {
+    if (pending_work_) {
+        pending_work_->cancel();
+    }
+    if (proxy_handler_) {
+        if (proxy_handler_->headers_sent()) {
+            downstream_->sendAbort();
+        } else {
+            SendError(408);
+        }
+        proxy_handler_.reset();
+    } else {
+        SendError(408);
+    }
+    if (tile_request_) {
+        LOG(WARNING) << "Connection timeout! Tile id: " << tile_request_->tile_id;
+    } else {
+        LOG(WARNING) << "Connection timeout!";
     }
 }
 
 void TileHandler::onRequest(std::unique_ptr<HTTPMessage> headers) noexcept {
     // TODO: add timeout for request!
+    timer_.scheduleTimeout(&connection_timeout_cb_, kConnectionTimeout);
     headers_ = std::move(headers);
     if (headers_->getMethod() != HTTPMethod::GET) {
         SendError(405);
@@ -344,13 +365,14 @@ void TileHandler::LockCacheAndGenerateTile() {
     assert(cacher_);
     assert(!request_info_str_.empty());
     const auto tiles_ids = tile_request_->metatile_id.TileIds();
+    std::vector<std::string> locked_cache_keys;
     for (const TileId& tile_id: tiles_ids) {
-        locked_cache_keys_.push_back(MakeCacherKey(tile_id, request_info_str_));
+        locked_cache_keys.push_back(MakeCacherKey(tile_id, request_info_str_));
     }
-    if (!cacher_->LockUntilSet(locked_cache_keys_)) {
+    std::shared_ptr<CacherLock> cacher_lock = cacher_->LockUntilSet(std::move(locked_cache_keys));
+    if (!cacher_lock) {
         // If rendering already started on other thread,
         // wait until tiles will be set to cache or report error
-        locked_cache_keys_.clear();
         LoadFromCacheOrError();
         return;
     }
@@ -359,7 +381,6 @@ void TileHandler::LockCacheAndGenerateTile() {
     // but tile_task will continue execution
     auto responce_task = std::make_shared<AsyncTask<std::string, TileProcessor::Error>>([this](std::string tile_data) {
         pending_work_.reset();
-        locked_cache_keys_.clear();
         if (tile_data.empty()) {
             SendError(500);
         } else {
@@ -367,8 +388,6 @@ void TileHandler::LockCacheAndGenerateTile() {
         }
     }, [this](TileProcessor::Error err) {
         pending_work_.reset();
-        cacher_->Unlock(locked_cache_keys_);
-        locked_cache_keys_.clear();
         if (err == TileProcessor::Error::not_found) {
             SendError(404);
         } else {
@@ -377,9 +396,13 @@ void TileHandler::LockCacheAndGenerateTile() {
     }, true);
     pending_work_ = responce_task;
 
+    // Capture tile_processor_ to keep it alive,
+    // in case when TileHandler was destroyed due to timeout
     auto tile_task = std::make_shared<TileProcessor::TileTask>(
-            [responce_task, cacher = cacher_, request_info_str = request_info_str_, tile_id = tile_request_->tile_id]
+            [responce_task, cacher_lock, cacher = cacher_, request_info_str = request_info_str_,
+             tile_id = tile_request_->tile_id, tile_processor = tile_processor_]
                 (Metatile&& metatile) {
+        cacher_lock->Cancel();
         bool response_sent = false;
         for (Tile& tile : metatile.tiles) {
             if (!response_sent && tile.id == tile_id) {
@@ -393,8 +416,9 @@ void TileHandler::LockCacheAndGenerateTile() {
         if (!response_sent) {
             responce_task->SetResult("");
         }
-    }, [responce_task](TileProcessor::Error err) {
+    }, [responce_task, cacher_lock](TileProcessor::Error err) {
         responce_task->NotifyError(err);
+        cacher_lock->Unlock();
     }, false);
 
     tile_processor_->GetMetatile(tile_request_, std::move(tile_task));
@@ -435,5 +459,9 @@ void TileHandler::SendResponse(std::string tile_data) noexcept {
 void TileHandler::OnProxyEom() noexcept {}
 
 void TileHandler::OnProxyError() noexcept {
-    SendError(500);
+    downstream_->sendAbort();
+}
+
+void TileHandler::OnProxyConnectError() noexcept {
+    LockCacheAndGenerateTile();
 }
