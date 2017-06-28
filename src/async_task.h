@@ -44,7 +44,7 @@ public:
     using result_cb_t = typename detail::CallbackHelper<Res>::type;
     using error_cb_t = typename detail::CallbackHelper<Err>::type;
 
-    AsyncTask() = default;
+    AsyncTask() : status_(std::make_shared<std::atomic<TaskStatus>>(TaskStatus::pending)) { }
 
     explicit AsyncTask(result_cb_t success_callback, bool cb_in_event_base_thread = false) :
                   success_callback_(std::move(success_callback)),
