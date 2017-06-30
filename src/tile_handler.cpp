@@ -25,6 +25,7 @@ using HTTPMethod = proxygen::HTTPMethod;
 
 
 static const auto kConnectionTimeout = std::chrono::seconds(20);
+static const auto kProxyTimeout = std::chrono::seconds(5);
 
 static std::string MakeCacherKey(const TileId& id, const std::string& info_str) {
     std::string key;
@@ -148,11 +149,17 @@ void TileHandler::OnConnectionTimeout() noexcept {
     }
     if (proxy_handler_) {
         if (proxy_handler_->headers_sent()) {
-            downstream_->sendAbort();
+            if (proxy_timeout_) {
+                proxy_handler_.reset();
+                downstream_->sendAbort();
+            } else {
+                proxy_timeout_ = true;
+                timer_.scheduleTimeout(&connection_timeout_cb_, kProxyTimeout);
+            }
         } else {
+            proxy_handler_.reset();
             SendError(408);
         }
-        proxy_handler_.reset();
     } else {
         SendError(408);
     }
@@ -164,7 +171,6 @@ void TileHandler::OnConnectionTimeout() noexcept {
 }
 
 void TileHandler::onRequest(std::unique_ptr<HTTPMessage> headers) noexcept {
-    // TODO: add timeout for request!
     timer_.scheduleTimeout(&connection_timeout_cb_, kConnectionTimeout);
     headers_ = std::move(headers);
     if (headers_->getMethod() != HTTPMethod::GET) {

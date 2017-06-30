@@ -134,7 +134,7 @@ HTTPWorker::~HTTPWorker() {
 
 void HTTPWorker::Connect() {
     connector_.reset();
-    connector_.connect(&evb_, addr_, std::chrono::milliseconds(1000));
+    connector_.connect(&evb_, addr_, std::chrono::milliseconds(3000));
 }
 
 bool HTTPWorker::ResolveHostname() {

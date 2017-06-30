@@ -50,6 +50,10 @@ optional<MetatileId> DataProvider::GetOptimalMetatileId(const TileId& tile_id, i
     }
     uint base_z = *base_z_itr;
     uint dz = tile_id.z - base_z;
+    // Limit metatile size to 8
+    if (dz > 3) {
+        dz = 3;
+    }
     uint metatile_size = std::pow(2u, dz);
     return MetatileId(tile_id, metatile_size);
 }

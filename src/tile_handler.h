@@ -79,6 +79,7 @@ private:
     util::ExtensionType ext_{util::ExtensionType::none};
     bool save_to_cache_{false};
     bool is_internal_request_{false};
+    bool proxy_timeout_{false};
 
     friend class ProxyHandler;
 };
