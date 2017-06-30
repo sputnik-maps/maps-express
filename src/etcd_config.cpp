@@ -1,5 +1,7 @@
 #include "etcd_config.h"
 
+#include <folly/io/async/EventBaseManager.h>
+
 #include <jsoncpp/json/reader.h>
 
 #include "etcd_client.h"
@@ -25,63 +27,66 @@ EtcdConfig::EtcdConfig(const std::string& etcd_host, const std::string& root_nod
         host_(etcd_host), root_node_name_(root_node)
 {
     client_ = std::make_unique<EtcdClient>(etcd_host);
-    Init();
+    UpdateAll();
 }
 
 EtcdConfig::EtcdConfig(std::shared_ptr<EtcdClient> etcd_client, const std::string& root_node_) :
         client_(std::move(etcd_client)), root_node_name_(root_node_)
 {
-    Init();
+    UpdateAll();
 }
 
 EtcdConfig::~EtcdConfig() {}
 
-
-void EtcdConfig::Init() {
-    if(!UpdateAll()) {
-        return;
+bool EtcdConfig::Valid() const {
+    if (!inited_) {
+        baton_.wait();
     }
-    valid_ = true;
-    StartWatch();
+    return valid_;
 }
 
 
-bool EtcdConfig::UpdateAll() {
-    std::shared_ptr<EtcdNode> etcd_node;
-    while (true) {
-        auto etcd_resp = client_->Get(root_node_name_, true);
-        EtcdError err = etcd_resp.second;
-        if (err == EtcdError::none) {
-            EtcdResponse& response = etcd_resp.first;
-            etcd_node = std::move(response.node);
-            update_id_ = response.etcd_id + 1;
-            break;
+void EtcdConfig::UpdateAll() {
+    auto task = std::make_shared<EtcdClient::GetTask>([&](EtcdResponse response) {
+        std::shared_ptr<EtcdNode> etcd_node = std::move(response.node);
+        update_id_ = response.etcd_id + 1;
+        for (auto& subnode : etcd_node->subnodes) {
+            if (subnode->is_dir) {
+                if (subnode->name == "/render") {
+                    for (auto& render_subnode : subnode->subnodes) {
+                        ParseAndeSet(kRenderMapping, *render_subnode);
+                    }
+                }
+            } else {
+                ParseAndeSet(kRootMapping, *subnode);
+            }
         }
+        if (!inited_) {
+            valid_ = true;
+            inited_ = true;
+            baton_.post();
+            StartWatch();
+        }
+    }, [&](EtcdError err) {
         if (err == EtcdError::network_error || err == EtcdError::connection_timeout) {
-            continue;
+            folly::EventBase* evb = folly::EventBaseManager::get()->getEventBase();
+            assert(evb);
+            evb->runAfterDelay([&]{UpdateAll();}, 500);
+            return;
         }
         if (err == EtcdError::not_found) {
             LOG(ERROR) << "Node \"" << root_node_name_ << "\" not found on etcd server!";
-            return false;
-        }
-        LOG(ERROR) << "Error while loading kv node " << root_node_name_;
-        return false;
-    }
-
-    assert(etcd_node);
-    for (auto& subnode : etcd_node->subnodes) {
-        if (subnode->is_dir) {
-            if (subnode->name == "/render") {
-                for (auto& render_subnode : subnode->subnodes) {
-                    ParseAndeSet(kRenderMapping, *render_subnode);
-                }
-            }
         } else {
-            ParseAndeSet(kRootMapping, *subnode);
+            LOG(ERROR) << "Error while loading kv node " << root_node_name_;
         }
-    }
+        if (!inited_) {
+            valid_ = false;
+            inited_ = true;
+            baton_.post();
+        }
+    }, false);
 
-    return true;
+   client_->Get(std::move(task), root_node_name_, true);
 }
 
 void EtcdConfig::StartWatch() {
