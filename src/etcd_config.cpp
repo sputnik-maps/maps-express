@@ -38,6 +38,7 @@ EtcdConfig::EtcdConfig(std::shared_ptr<EtcdClient> etcd_client, const std::strin
 
 EtcdConfig::~EtcdConfig() {}
 
+
 bool EtcdConfig::Valid() const {
     if (!inited_) {
         baton_.wait();
@@ -45,12 +46,11 @@ bool EtcdConfig::Valid() const {
     return valid_;
 }
 
-
 void EtcdConfig::UpdateAll() {
     auto task = std::make_shared<EtcdClient::GetTask>([&](EtcdResponse response) {
-        std::shared_ptr<EtcdNode> etcd_node = std::move(response.node);
+        assert(response.node);
         update_id_ = response.etcd_id + 1;
-        for (auto& subnode : etcd_node->subnodes) {
+        for (auto& subnode : response.node->subnodes) {
             if (subnode->is_dir) {
                 if (subnode->name == "/render") {
                     for (auto& render_subnode : subnode->subnodes) {
@@ -65,8 +65,8 @@ void EtcdConfig::UpdateAll() {
             valid_ = true;
             inited_ = true;
             baton_.post();
-            StartWatch();
         }
+        StartWatch();
     }, [&](EtcdError err) {
         if (err == EtcdError::network_error || err == EtcdError::connection_timeout) {
             folly::EventBase* evb = folly::EventBaseManager::get()->getEventBase();
