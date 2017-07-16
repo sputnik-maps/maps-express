@@ -187,7 +187,7 @@ int main(int argc, char* argv[]) {
 
     proxygen::HTTPServerOptions options;
     options.threads = std::thread::hardware_concurrency();
-    options.idleTimeout = std::chrono::milliseconds(20000);
+    options.idleTimeout = std::chrono::seconds(30);
     options.shutdownOn = {SIGINT, SIGTERM};
     options.enableContentCompression = true;
     options.contentCompressionLevel = 5;

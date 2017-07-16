@@ -54,9 +54,16 @@ void TileCacher::Set(const std::string& key, std::shared_ptr<const CachedTile> c
         }
         set_waiters_.erase(set_waiters_itr);
     }
-    SetImpl(key, cached_tile, expire_time);
     for (auto get_task : waiters_vec) {
         get_task->SetResult(cached_tile);
+    }
+    SetImpl(key, cached_tile, expire_time);
+    folly::EventBase* evb = folly::EventBaseManager::get()->getExistingEventBase();
+    if (evb) {
+        evb->runAfterDelay([this, key]{
+            std::lock_guard<std::mutex> lock(mux_);
+            tmp_cache_.erase(key);
+        }, 60000);
     }
 }
 
@@ -112,8 +119,7 @@ void TileCacher::OnTileRetrieved(const std::string& key, std::shared_ptr<CachedT
         if (waiters_itr == get_waiters_.end()) {
             return;
         }
-        auto emplace_res = tmp_cache_.emplace(key, cached_tile);
-        tmp_cache_itr = emplace_res.first;
+        tmp_cache_[key] = cached_tile;
         waiters = std::move(waiters_itr->second);
         get_waiters_.erase(waiters_itr);
     }
@@ -121,7 +127,7 @@ void TileCacher::OnTileRetrieved(const std::string& key, std::shared_ptr<CachedT
         async_task->SetResult(cached_tile);
     }
     std::lock_guard<std::mutex> lock(mux_);
-    tmp_cache_.erase(tmp_cache_itr);
+    tmp_cache_.erase(key);
 }
 
 void TileCacher::OnRetrieveError(const std::string& key) {
@@ -141,20 +147,9 @@ void TileCacher::OnRetrieveError(const std::string& key) {
 }
 
 void TileCacher::OnTileSet(const std::string& key) {
-    folly::EventBase* evb = folly::EventBaseManager::get()->getExistingEventBase();
-    if (evb) {
-        evb->runAfterDelay([this, key]{
-            std::lock_guard<std::mutex> lock(mux_);
-            tmp_cache_.erase(key);
-        }, 60000);
-    } else {
-        std::lock_guard<std::mutex> lock(mux_);
-        tmp_cache_.erase(key);
-    }
+
 }
 
 void TileCacher::OnSetError(const std::string& key) {
-    // TODO: add retry logic
-    std::lock_guard<std::mutex> lock(mux_);
-    tmp_cache_.erase(key);
+    // TODO;
 }

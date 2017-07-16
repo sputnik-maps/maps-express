@@ -25,7 +25,7 @@ using HTTPMethod = proxygen::HTTPMethod;
 
 
 static const auto kConnectionTimeout = std::chrono::seconds(20);
-static const auto kProxyTimeout = std::chrono::seconds(5);
+static const auto kExtraTimeout = std::chrono::seconds(5);
 
 static std::string MakeCacherKey(const TileId& id, const std::string& info_str) {
     std::string key;
@@ -47,6 +47,8 @@ static std::string MakeRequestInfoStr(const TileRequest& request, const std::str
     }
     info_str.append(".");
     info_str.append(ext_str);
+    info_str.append("/");
+    info_str.append(request.endpoint_params->style_name);
     info_str.append("/");
     info_str.append(request.data_version);
     info_str.append("/");
@@ -141,28 +143,33 @@ TileHandler::~TileHandler() {
     if (pending_work_) {
         pending_work_->cancel();
     }
+    if (proxy_handler_) {
+        proxy_handler_->Detach();
+    }
 }
 
 void TileHandler::OnConnectionTimeout() noexcept {
+    if (!extra_timeout_ && headers_sent_) {
+        // Schedule extra timeout if headers were already sent to client
+        extra_timeout_ = true;
+        timer_.scheduleTimeout(&connection_timeout_cb_, kExtraTimeout);
+        return;
+    }
+
     if (pending_work_) {
         pending_work_->cancel();
     }
     if (proxy_handler_) {
-        if (proxy_handler_->headers_sent()) {
-            if (proxy_timeout_) {
-                proxy_handler_.reset();
-                downstream_->sendAbort();
-            } else {
-                proxy_timeout_ = true;
-                timer_.scheduleTimeout(&connection_timeout_cb_, kProxyTimeout);
-            }
-        } else {
-            proxy_handler_.reset();
-            SendError(408);
-        }
+        proxy_handler_->Detach();
+        proxy_handler_ = nullptr;
+    }
+
+    if (headers_sent_) {
+        downstream_->sendAbort();
     } else {
         SendError(408);
     }
+
     if (tile_request_) {
         LOG(WARNING) << "Connection timeout! Tile id: " << tile_request_->tile_id;
     } else {
@@ -432,7 +439,7 @@ void TileHandler::LockCacheAndGenerateTile() {
 
 void TileHandler::ProxyToOtherNode(const folly::SocketAddress& addr) noexcept {
     assert(headers_);
-    proxy_handler_ = std::make_unique<ProxyHandler>(*this, timer_, addr, std::move(headers_), *downstream_);
+    proxy_handler_ = new ProxyHandler(*this, timer_, addr, std::move(headers_), *downstream_);
 }
 
 
@@ -460,9 +467,12 @@ void TileHandler::SendResponse(std::string tile_data) noexcept {
     buffer_ = std::move(tile_data);
     rb.body(folly::IOBuf::wrapBuffer(buffer_.data(), buffer_.size()));
     rb.sendWithEOM();
+    headers_sent_ = true;
 }
 
-void TileHandler::OnProxyEom() noexcept {}
+void TileHandler::OnProxyEom() noexcept {
+
+}
 
 void TileHandler::OnProxyError() noexcept {
     downstream_->sendAbort();
@@ -470,4 +480,8 @@ void TileHandler::OnProxyError() noexcept {
 
 void TileHandler::OnProxyConnectError() noexcept {
     LockCacheAndGenerateTile();
+}
+
+void TileHandler::OnProxyHeadersSent() noexcept {
+    headers_sent_ = true;
 }

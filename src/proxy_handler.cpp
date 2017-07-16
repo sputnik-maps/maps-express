@@ -12,7 +12,6 @@ ProxyHandler::ProxyHandler(Callbacks& callbacks, folly::HHWheelTimer& timer,
         addr_(addr),
         headers_(std::move(headers)),
         callbacks_(callbacks),
-        timer_(timer),
         downstream_(downstream)
 {
     assert(headers_);
@@ -20,11 +19,7 @@ ProxyHandler::ProxyHandler(Callbacks& callbacks, folly::HHWheelTimer& timer,
     Connect();
 }
 
-ProxyHandler::~ProxyHandler() {
-    if (txn_) {
-        txn_->sendAbort();
-    }
-}
+ProxyHandler::~ProxyHandler() {}
 
 void ProxyHandler::Connect() {
     const folly::AsyncSocket::OptionMap opts{
@@ -34,7 +29,22 @@ void ProxyHandler::Connect() {
                        std::chrono::seconds(20), opts);
 }
 
+void ProxyHandler::Detach() {
+    assert(!detached_);
+    if (txn_) {
+        txn_->sendAbort();
+    }
+    detached_ = true;
+    MaybeTerminate();
+}
+
 void ProxyHandler::connectSuccess(proxygen::HTTPUpstreamSession* session) {
+    if (detached_) {
+        session->drain();
+        delete this;
+        return;
+    }
+
     session_ = SessionWrapper(session);
     txn_ = session->newTransaction(this);
     if (!txn_) {
@@ -44,16 +54,20 @@ void ProxyHandler::connectSuccess(proxygen::HTTPUpstreamSession* session) {
         return;
     }
     txn_->sendHeadersWithEOM(*headers_);
-    headers_sent_ = true;
 }
 
 void ProxyHandler::connectError(const folly::AsyncSocketException& ex) {
     LOG(ERROR) << ex;
+    if (detached_) {
+        delete this;
+        return;
+    }
     if (num_reconnects_ < kMaxReconnects) {
         ++num_reconnects_;
         Connect();
     } else {
         callbacks_.OnProxyConnectError();
+        MaybeTerminate();
     }
 }
 
@@ -61,10 +75,12 @@ void ProxyHandler::setTransaction(proxygen::HTTPTransaction* txn) noexcept {}
 
 void ProxyHandler::detachTransaction() noexcept {
     txn_ = nullptr;
+    MaybeTerminate();
 }
 
 void ProxyHandler::onHeadersComplete(std::unique_ptr<proxygen::HTTPMessage> msg) noexcept {
     downstream_.sendHeaders(*msg);
+    callbacks_.OnProxyHeadersSent();
 }
 
 void ProxyHandler::onBody(std::unique_ptr<folly::IOBuf> chain) noexcept {
@@ -89,3 +105,10 @@ void ProxyHandler::onEgressPaused() noexcept {
 void ProxyHandler::onEgressResumed() noexcept {
     downstream_.resumeIngress();
 }
+
+void ProxyHandler::MaybeTerminate() {
+    if (detached_ && !txn_) {
+        delete this;
+    }
+}
+

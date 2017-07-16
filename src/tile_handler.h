@@ -51,6 +51,7 @@ public:
     void OnProxyEom() noexcept override;
     void OnProxyError() noexcept override;
     void OnProxyConnectError() noexcept override;
+    void OnProxyHeadersSent() noexcept override;
 
     void OnConnectionTimeout() noexcept;
 
@@ -66,10 +67,10 @@ private:
     std::shared_ptr<const endpoints_map_t> endpoints_;
     std::shared_ptr<TileCacher> cacher_;
     std::unique_ptr<proxygen::HTTPMessage> headers_;
-    std::unique_ptr<ProxyHandler> proxy_handler_;
     folly::HHWheelTimer& timer_;
     ConnectionTimeoutCb connection_timeout_cb_;
     NodesMonitor* nodes_monitor_{nullptr};
+    ProxyHandler* proxy_handler_{nullptr};
 
     std::shared_ptr<TileRequest> tile_request_;
     std::shared_ptr<AsyncTaskBase> pending_work_;
@@ -79,7 +80,8 @@ private:
     util::ExtensionType ext_{util::ExtensionType::none};
     bool save_to_cache_{false};
     bool is_internal_request_{false};
-    bool proxy_timeout_{false};
+    bool extra_timeout_{false};
+    bool headers_sent_{false};
 
     friend class ProxyHandler;
 };
