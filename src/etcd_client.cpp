@@ -300,6 +300,7 @@ void EtcdClient::Set(std::shared_ptr<UpdateTask> task, const std::string& key,
         body.append(std::to_string(ttl));
         if (refresh) {
             body.append("&refresh=true");
+            body.append("&prevExist=true");
         }
     }
     auto body_buf = folly::IOBuf::copyBuffer(body);

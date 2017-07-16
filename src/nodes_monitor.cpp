@@ -11,6 +11,7 @@ using std::experimental::nullopt;
 const std::string kNodesKey = "nodes";
 
 NodesMonitor::NodesMonitor(const std::string& host, uint port, std::shared_ptr<EtcdClient> etcd_client) :
+        self_addr_{folly::SocketAddress(host, port, false), true},
         etcd_client_(std::move(etcd_client)),
         evb_(etcd_client_->get_event_base())
 {
@@ -20,8 +21,8 @@ NodesMonitor::NodesMonitor(const std::string& host, uint port, std::shared_ptr<E
     etcd_key_.append(host);
     etcd_key_.append("_");
     etcd_key_.append(port_str);
-    host_port_ = host + ':';
-    host_port_.append(port_str);
+    self_addr_str_ = host + ':';
+    self_addr_str_.append(port_str);
     UpdateAll();
 }
 
@@ -34,7 +35,9 @@ EtcdNodeToAddr(EtcdNode& node, const std::string& self_host_port) {
         return nullopt;
     }
     const std::string& value = node.value;
-    bool is_self_addr = (value == self_host_port);
+    if (value == self_host_port) {
+        return nullopt;
+    }
     auto delimiter_pos = value.find(':');
     if (delimiter_pos == value.npos) {
         LOG(ERROR) << "Invalid host:port value: " << value;
@@ -43,7 +46,7 @@ EtcdNodeToAddr(EtcdNode& node, const std::string& self_host_port) {
 
     try {
         std::uint16_t port = std::stoi(value.substr(delimiter_pos + 1));
-        return std::make_pair(folly::SocketAddress(value.substr(0, delimiter_pos), port, true), is_self_addr);
+        return std::make_pair(folly::SocketAddress(value.substr(0, delimiter_pos), port, true), false);
     } catch (const std::exception& e) {
         LOG(ERROR) << "Failed to resolve hostname \"" << node.value << "\": " << e.what();
     }
@@ -58,11 +61,11 @@ void NodesMonitor::UpdateAll() {
     auto task = std::make_shared<EtcdClient::GetTask>([this](EtcdResponse response){
         update_id_ = response.etcd_id + 1;
         EtcdNode& etcd_node = *response.node;
-        auto addr_vec = std::make_shared<addr_vec_t>();
+        auto addr_vec = std::make_shared<addr_vec_t>(std::initializer_list<addr_entry_t>{self_addr_});
         addr_vec ->reserve(etcd_node.subnodes.size());
         for (auto& subnode : etcd_node.subnodes) {
             assert(subnode);
-            auto addr = EtcdNodeToAddr(*subnode, host_port_);
+            auto addr = EtcdNodeToAddr(*subnode, self_addr_str_);
             if (addr) {
                 addr_vec ->push_back(std::move(*addr));
             }
@@ -84,10 +87,9 @@ void NodesMonitor::UpdateAll() {
 void NodesMonitor::Watch() {
     auto task = std::make_shared<EtcdClient::WatchTask>([this](std::shared_ptr<EtcdUpdate> update) {
         assert(update->new_node);
-        EtcdNode& etcd_node = *update->new_node;
-        update_id_ = etcd_node.modified_id + 1;
+        update_id_ = update->new_node->modified_id + 1;
         if (update->type == EtcdUpdate::Type::set) {
-            auto new_addr_entry = EtcdNodeToAddr(etcd_node, host_port_);
+            auto new_addr_entry = EtcdNodeToAddr(*update->new_node, self_addr_str_);
             if (new_addr_entry) {
                 auto new_addr_vec = std::make_shared<addr_vec_t>(*addr_vec_);
                 new_addr_vec->push_back(std::move(*new_addr_entry));
@@ -95,19 +97,23 @@ void NodesMonitor::Watch() {
                 std::atomic_store(&addr_vec_, std::move(new_addr_vec));
             }
         } else if (update->type == EtcdUpdate::Type::remove) {
-            auto new_addr_vec = std::make_shared<addr_vec_t>();
-            if (!addr_vec_->empty()) {
-                new_addr_vec->reserve(addr_vec_->size() - 1);
-            }
-            for (auto addr_entry_itr = addr_vec_->begin(); addr_entry_itr != addr_vec_->end(); ++addr_entry_itr) {
-                const folly::SocketAddress& addr = addr_entry_itr->first;
-                if (addr.getAddressStr() + ':' + std::to_string(addr.getPort()) == etcd_node.value) {
-                    new_addr_vec->insert(new_addr_vec->end(), ++addr_entry_itr, addr_vec_->end());
-                    break;
+            assert(update->old_node);
+            const std::string& removed_addr = update->old_node->value;
+            if (removed_addr != self_addr_str_) {
+                auto new_addr_vec = std::make_shared<addr_vec_t>(std::initializer_list<addr_entry_t>{self_addr_});
+                if (!addr_vec_->empty()) {
+                    new_addr_vec->reserve(addr_vec_->size() - 1);
                 }
-                new_addr_vec->push_back(*addr_entry_itr);
+                for (auto addr_entry_itr = addr_vec_->begin(); addr_entry_itr != addr_vec_->end(); ++addr_entry_itr) {
+                    const folly::SocketAddress& addr = addr_entry_itr->first;
+                    if (addr.getAddressStr() + ':' + std::to_string(addr.getPort()) == removed_addr) {
+                        new_addr_vec->insert(new_addr_vec->end(), ++addr_entry_itr, addr_vec_->end());
+                        break;
+                    }
+                    new_addr_vec->push_back(*addr_entry_itr);
+                }
+                std::atomic_store(&addr_vec_, std::move(new_addr_vec));
             }
-            std::atomic_store(&addr_vec_, std::move(new_addr_vec));
         }
         Watch();
     }, [this](EtcdError err){
@@ -147,7 +153,7 @@ void NodesMonitor::Register() {
         Register();
     }, false);
 
-    etcd_client_->Set(std::move(task), etcd_key_, host_port_, 10, false);
+    etcd_client_->Set(std::move(task), etcd_key_, self_addr_str_, 10, false);
 }
 
 void NodesMonitor::UpdateRegistration() {
@@ -163,9 +169,13 @@ void NodesMonitor::UpdateRegistration() {
         if (err == EtcdError::pending_shutdown) {
             return;
         }
+        if (err == EtcdError::not_found) {
+            registered_ = false;
+            Register();
+        }
         evb_.runAfterDelay([this]{ UpdateRegistration(); }, 500);
     }, false);
-    etcd_client_->Set(std::move(task), etcd_key_, host_port_, 10, true);
+    etcd_client_->Set(std::move(task), etcd_key_, self_addr_str_, 10, true);
 }
 
 void NodesMonitor::Unregister() {

@@ -29,7 +29,7 @@ set_target_properties(maps-express PROPERTIES COMPILE_FLAGS "-std=c++14 -DMAPNIK
     -DHAVE_PNG -DHAVE_WEBP -DHAVE_TIFF -DLINUX -DMAPNIK_THREADSAFE -DBOOST_SPIRIT_NO_PREDEFINED_TERMINALS=1 \
     -DBOOST_PHOENIX_NO_PREDEFINED_TERMINALS=1 -DBOOST_SPIRIT_USE_PHOENIX_V3=1 -DHAVE_CAIRO -DGRID_RENDERER \
     -fvisibility=hidden -fvisibility-inlines-hidden -Wall -pthread -ftemplate-depth-300 -Wsign-compare -Wshadow \
-    -Werror -O3")
+    -Werror -g")
 
 target_link_libraries(maps-express
       ${CMAKE_SOURCE_DIR}/mapnik-vector-tile/build/Release/obj.target/gyp/libmapnik_vector_tile_impl.a

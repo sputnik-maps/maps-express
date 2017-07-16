@@ -23,10 +23,11 @@ private:
     void Watch();
     void UpdateRegistration();
 
+    addr_entry_t self_addr_;
     std::shared_ptr<EtcdClient> etcd_client_;
     std::shared_ptr<addr_vec_t> addr_vec_;
     std::string etcd_key_;
-    std::string host_port_;
+    std::string self_addr_str_;
     folly::EventBase& evb_;
     std::int64_t update_id_{0};
     std::atomic_bool registered_{false};
