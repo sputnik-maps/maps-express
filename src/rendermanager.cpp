@@ -112,7 +112,7 @@ std::shared_ptr<RenderTask> RenderManager::Render(std::unique_ptr<RenderRequest>
                                                   std::function<void (render_result_t&&)> success_callback,
                                                   std::function<void ()> error_callback) {
     assert(request);
-    auto task = std::make_shared<RenderTask>(std::move(success_callback), std::move(error_callback), true);
+    auto task = std::make_shared<RenderTask>(std::move(success_callback), std::move(error_callback), false);
     if (!has_style(request->style_name)) {
         task->NotifyError();
         return task;
@@ -125,7 +125,7 @@ std::shared_ptr<RenderTask> RenderManager::MakeSubtile(std::unique_ptr<SubtileRe
                                                        std::function<void (render_result_t&&)> success_callback,
                                                        std::function<void ()> error_callback) {
     assert(request);
-    auto task = std::make_shared<RenderTask>(std::move(success_callback), std::move(error_callback), true);
+    auto task = std::make_shared<RenderTask>(std::move(success_callback), std::move(error_callback), false);
     if (!(request->mvt_tile.id.Valid() && request->tile_id.Valid())) {
         LOG(ERROR) << "Invalid tile id!";
         task->NotifyError();

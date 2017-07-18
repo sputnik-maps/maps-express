@@ -67,7 +67,7 @@ void NodesMonitor::UpdateAll() {
             assert(subnode);
             auto addr = EtcdNodeToAddr(*subnode, self_addr_str_);
             if (addr) {
-                addr_vec ->push_back(std::move(*addr));
+                addr_vec->push_back(std::move(*addr));
             }
         }
         std::sort(addr_vec->begin(), addr_vec->end(), addr_vec_comp);
@@ -78,8 +78,7 @@ void NodesMonitor::UpdateAll() {
             return;
         }
         LOG(ERROR) << err;
-
-        UpdateAll();
+        evb_.runAfterDelay([this]{ UpdateAll(); }, 500);
     }, false);
     etcd_client_->Get(std::move(task), kNodesKey);
 }
@@ -100,7 +99,7 @@ void NodesMonitor::Watch() {
             assert(update->old_node);
             const std::string& removed_addr = update->old_node->value;
             if (removed_addr != self_addr_str_) {
-                auto new_addr_vec = std::make_shared<addr_vec_t>(std::initializer_list<addr_entry_t>{self_addr_});
+                auto new_addr_vec = std::make_shared<addr_vec_t>();
                 if (!addr_vec_->empty()) {
                     new_addr_vec->reserve(addr_vec_->size() - 1);
                 }
@@ -121,11 +120,11 @@ void NodesMonitor::Watch() {
             return;
         }
         if (err == EtcdError::wait_id_outdated) {
-            UpdateAll();
+            evb_.runInLoop([this]{ UpdateAll(); });
             return;
         }
         if (err == EtcdError::connection_timeout) {
-            Watch();
+            evb_.runInLoop([this]{ Watch(); });
         }
         LOG(ERROR) << err;
         evb_.runAfterDelay([this]{ Watch(); }, 500);
@@ -150,7 +149,7 @@ void NodesMonitor::Register() {
             return;
         }
         pending_registration_ = false;
-        Register();
+        evb_.runInLoop([this]{ Register(); });
     }, false);
 
     etcd_client_->Set(std::move(task), etcd_key_, self_addr_str_, 10, false);
@@ -171,7 +170,7 @@ void NodesMonitor::UpdateRegistration() {
         }
         if (err == EtcdError::not_found) {
             registered_ = false;
-            Register();
+            evb_.runInLoop([this]{ Register(); });
         }
         evb_.runAfterDelay([this]{ UpdateRegistration(); }, 500);
     }, false);
@@ -179,10 +178,10 @@ void NodesMonitor::UpdateRegistration() {
 }
 
 void NodesMonitor::Unregister() {
-    if (!registered_) {
+    bool expected = true;
+    if (!registered_.compare_exchange_strong(expected, false)) {
         return;
     }
-    registered_ = false;
     etcd_client_->Delete(std::make_shared<EtcdClient::UpdateTask>(), etcd_key_);
 }
 

@@ -210,6 +210,10 @@ int main(int argc, char* argv[]) {
     SignalHandler sh(monitor, server, nodes_monitor);
     gSignalHandler.store(&sh);
 
+    if (nodes_monitor) {
+        nodes_monitor->Register();
+    }
+
     t.join();
     std::signal(SIGHUP, SIG_DFL);
 

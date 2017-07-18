@@ -169,9 +169,6 @@ void HttpHandlerFactory::onServerStart(folly::EventBase* evb) noexcept {
                 std::chrono::milliseconds(folly::HHWheelTimer::DEFAULT_TICK_INTERVAL),
                 folly::AsyncTimeout::InternalEnum::NORMAL,
                 std::chrono::seconds(60));
-    if (nodes_monitor_) {
-        nodes_monitor_->Register();
-    }
 }
 
 void HttpHandlerFactory::onServerStop() noexcept {

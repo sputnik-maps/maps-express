@@ -113,8 +113,7 @@ static optional<folly::SocketAddress> GetRenderNodeAddr(const NodesMonitor& moni
         return nullopt;
     }
     const TileId lt_tile_id = metatile_id.left_top();
-    int i = (lt_tile_id.x ^ lt_tile_id.y ^ lt_tile_id.y ^
-             metatile_id.width() ^ metatile_id.height()) % nodes_vec->size();
+    int i = (lt_tile_id.x ^ lt_tile_id.y) % nodes_vec->size();
     const NodesMonitor::addr_entry_t& addr_entry = (*nodes_vec)[i];
     if (addr_entry.second) {
         // Current node
@@ -392,13 +391,9 @@ void TileHandler::LockCacheAndGenerateTile() {
 
     // responce_task will be cancelled in case of connection timeout,
     // but tile_task will continue execution
-    auto responce_task = std::make_shared<AsyncTask<std::string, TileProcessor::Error>>([this](std::string tile_data) {
+    auto response_task = std::make_shared<AsyncTask<std::string, TileProcessor::Error>>([this](std::string tile_data) {
         pending_work_.reset();
-        if (tile_data.empty()) {
-            SendError(500);
-        } else {
-            SendResponse(std::move(tile_data));
-        }
+        SendResponse(std::move(tile_data));
     }, [this](TileProcessor::Error err) {
         pending_work_.reset();
         if (err == TileProcessor::Error::not_found) {
@@ -407,19 +402,25 @@ void TileHandler::LockCacheAndGenerateTile() {
             SendError(500);
         }
     }, true);
-    pending_work_ = responce_task;
+    pending_work_ = response_task;
+
+    auto start_time = std::chrono::system_clock::now();
 
     // Capture tile_processor_ to keep it alive,
     // in case when TileHandler was destroyed due to timeout
     auto tile_task = std::make_shared<TileProcessor::TileTask>(
-            [responce_task, cacher_lock, cacher = cacher_, request_info_str = request_info_str_,
-             tile_id = tile_request_->tile_id, tile_processor = tile_processor_]
+            [response_task, cacher_lock, cacher = cacher_, request_info_str = request_info_str_,
+             tile_id = tile_request_->tile_id, tile_processor = tile_processor_, start_time]
                 (Metatile&& metatile) {
+        auto stop_time = std::chrono::system_clock::now();
+        std::cout << "Processing of " << metatile.id << " took "
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(stop_time - start_time).count() << std::endl;
         cacher_lock->Cancel();
         bool response_sent = false;
         for (Tile& tile : metatile.tiles) {
             if (!response_sent && tile.id == tile_id) {
-                responce_task->SetResult(tile.data);
+                response_task->SetResult(tile.data);
+                response_sent = true;
             }
             // TODO: Calculate cache policy
             auto cached_tile = std::make_shared<CachedTile>(CachedTile{std::move(tile.data)});
@@ -427,10 +428,10 @@ void TileHandler::LockCacheAndGenerateTile() {
                          TTLPolicyToSeconds(cached_tile->policy), nullptr);
         }
         if (!response_sent) {
-            responce_task->SetResult("");
+            response_task->NotifyError(TileProcessor::Error::internal);
         }
-    }, [responce_task, cacher_lock](TileProcessor::Error err) {
-        responce_task->NotifyError(err);
+    }, [response_task, cacher_lock](TileProcessor::Error err) {
+        response_task->NotifyError(err);
         cacher_lock->Unlock();
     }, false);
 
