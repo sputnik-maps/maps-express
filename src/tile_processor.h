@@ -38,6 +38,8 @@ public:
 
     void CancelProcessing();
 
+    uint GetStyleVersion(const std::string& style_name);
+
 private:
     void LoadTile();
     void OnLoadSuccess(Tile&& tile);

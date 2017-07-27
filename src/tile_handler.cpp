@@ -39,7 +39,8 @@ static std::string MakeCacherKey(const TileId& id, const std::string& info_str) 
     return key;
 }
 
-static std::string MakeRequestInfoStr(const TileRequest& request, const std::string& ext_str) {
+static std::string MakeRequestInfoStr(const TileRequest& request, const std::string& ext_str,
+                                      uint style_version) {
     std::string info_str;
     for (const std::string& tag : request.tags) {
         info_str.append(tag);
@@ -52,6 +53,10 @@ static std::string MakeRequestInfoStr(const TileRequest& request, const std::str
     info_str.append("/");
     info_str.append(request.data_version);
     info_str.append("/");
+    if (style_version != 0) {
+        info_str.append(std::to_string(style_version));
+        info_str.append("/");
+    }
     info_str.append(std::to_string(request.metatile_id.width()));
     info_str.append("/");
     info_str.append(std::to_string(request.metatile_id.height()));
@@ -293,7 +298,11 @@ void TileHandler::onRequest(std::unique_ptr<HTTPMessage> headers) noexcept {
     }
 
     if (cacher_) {
-        request_info_str_ = MakeRequestInfoStr(*tile_request_, ext_str);
+        uint style_version = 0;
+        if (!endpoint_params.style_name.empty()) {
+            style_version = tile_processor_->GetStyleVersion(endpoint_params.style_name);
+        }
+        request_info_str_ = MakeRequestInfoStr(*tile_request_, ext_str, style_version);
         is_internal_request_ = IsInternalRequest(*headers_, internal_port_);
         TryLoadFromCache();
     } else {

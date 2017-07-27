@@ -62,7 +62,7 @@ void StyleUpdateObserver::OnUpdate(std::shared_ptr<Json::Value> value) {
 
 
 RenderManager::RenderManager(Config& config) :
-        style_names_(std::make_shared<std::unordered_set<std::string>>()),
+        active_styles_(std::make_shared<std::vector<style_version_t>>()),
         update_observer_(*this),
         config_(config)
 {
@@ -76,6 +76,9 @@ RenderManager::RenderManager(Config& config) :
     std::shared_ptr<const Json::Value> jstyles = config.GetValue("render/styles", &update_observer_);
     if (jstyles->isObject()) {
         styles = std::make_shared<std::vector<StyleInfo>>();
+        auto num_styles = jstyles->size();
+        styles->reserve(num_styles);
+        active_styles_->reserve(num_styles);
         for (Json::ValueConstIterator jstyle_itr = jstyles->begin(); jstyle_itr != jstyles->end(); ++jstyle_itr) {
             const std::string& style_name = jstyle_itr.name();
             styles->emplace_back();
@@ -83,12 +86,15 @@ RenderManager::RenderManager(Config& config) :
                 styles->pop_back();
                 continue;
             }
-            if (style_names_->find(style_name) != style_names_->end()) {
-                LOG(ERROR) << "Duplicate style name: " << style_name;
-                styles->pop_back();
-                continue;
+            for (const auto& style : *active_styles_) {
+                if (style.first == style_name) {
+                    LOG(ERROR) << "Duplicate style name: " << style_name;
+                    styles->pop_back();
+                    continue;
+                }
             }
-            style_names_->insert(std::move(style_name));
+            const StyleInfo& style_info = styles->back();
+            active_styles_->emplace_back(std::move(style_name), style_info.version);
         }
     } else {
         LOG(WARNING) << "No styles provided";
@@ -133,6 +139,16 @@ std::shared_ptr<RenderTask> RenderManager::MakeSubtile(std::unique_ptr<SubtileRe
     }
     render_pool_.PostTask(TileWorkTask{task, std::move(request)});
     return task;
+}
+
+uint RenderManager::GetStyleVersion(const std::string& style_name) {
+    auto active_styles = std::atomic_load(&active_styles_);
+    for (const auto& style_info : *active_styles) {
+        if (style_info.first == style_name) {
+            return style_info.second;
+        }
+    }
+    return 0;
 }
 
 void RenderManager::PostStyleUpdate(std::shared_ptr<const Json::Value> jstyles) {
@@ -186,11 +202,12 @@ void RenderManager::UpdateWorker(RenderWorker& worker) {
                 }, rw);
             }
             // Update style names set
-            auto new_style_names = std::make_shared<std::unordered_set<std::string>>();
+            auto new_active_styles = std::make_shared<std::vector<style_version_t>>();
+            new_active_styles->reserve(pending_update_.size());
             for (const StyleInfo& style_info : pending_update_) {
-                new_style_names->insert(style_info.name);
+                new_active_styles->emplace_back(style_info.name, style_info.version);
             }
-            std::atomic_store(&style_names_, std::move(new_style_names));
+            std::atomic_store(&active_styles_, std::move(new_active_styles));
             FinishUpdate();
         } else {
             // Update next worker

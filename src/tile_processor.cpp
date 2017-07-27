@@ -28,6 +28,10 @@ void TileProcessor::GetMetatile(std::shared_ptr<TileRequest> request, std::share
     }
 }
 
+uint TileProcessor::GetStyleVersion(const std::string& style_name) {
+    return render_manager_.GetStyleVersion(style_name);
+}
+
 void TileProcessor::CancelProcessing() {
     if (pending_work_) {
         pending_work_->cancel();
