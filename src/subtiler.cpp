@@ -12,12 +12,12 @@
 #include "bbox_clipper.h"
 #include "util.h"
 
-Subtiler::Subtiler(const Tile& base_tile, const std::shared_ptr<FilterTable> filter_table) :
+Subtiler::Subtiler(const Tile& base_tile, std::shared_ptr<const FilterTable> filter_table) :
         base_tile_(base_tile),
         filter_table_(filter_table),
         transcoder_("utf-8") {}
 
-Subtiler::Subtiler(Tile&& base_tile, const std::shared_ptr<FilterTable> filter_table) :
+Subtiler::Subtiler(Tile&& base_tile, std::shared_ptr<const FilterTable> filter_table) :
         base_tile_(std::move(base_tile)),
         filter_table_(filter_table),
         transcoder_("utf-8") {
@@ -44,6 +44,16 @@ std::string Subtiler::MakeSubtile(const TileId& target_tile_id,
     protozero::pbf_reader tile_message(base_tile_.data);
     protozero::pbf_writer result_pbf(result);
 
+    const FilterTable::filter_map_t* filter_map = nullptr;
+    if (filter_table_) {
+        uint base_z = base_tile_.id.z;
+        filter_map = filter_table_->GetFiltersMap(base_z);
+        if (!filter_map) {
+            LOG(ERROR) << "Filter map not found for zoom: " << std::to_string(base_z);
+            return "";
+        }
+    }
+
     // loop through the layers of the tile!
     while (tile_message.next(mapnik::vector_tile_impl::Tile_Encoding::LAYERS))
     {
@@ -59,11 +69,12 @@ std::string Subtiler::MakeSubtile(const TileId& target_tile_id,
         if (layers != nullptr && layers->find(layer_name) == layers->end()) {
             continue;
         }
-        layer_filter_.reset();
-        if (filter_table_ != nullptr) {
-            if (!filter_table_->GetFilter(target_tile_id.z, layer_name, &layer_filter_)) {
+        if (filter_map) {
+            auto filter_itr = filter_map->find(layer_name);
+            if (filter_itr == filter_map->end()) {
                 continue;
             }
+            layer_filter_ = filter_itr->second;
         }
         if (!layer_message.next(mapnik::vector_tile_impl::Layer_Encoding::EXTENT))
         {
@@ -759,9 +770,3 @@ bool Subtiler::WriteRing(const mapnik::geometry::linear_ring<std::int64_t> &line
     output_geometry->add_element(15); // close_path
     return true;
 }
-
-
-
-
-
-

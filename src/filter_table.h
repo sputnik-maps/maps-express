@@ -1,20 +1,28 @@
 #pragma once
 
-#include <mapnik/config.hpp>
 #include <mapnik/map.hpp>
 #include <mapnik/expression.hpp>
-#include <mapnik/expression_node.hpp>
-#include <mapnik/rule.hpp>
+
 
 class FilterTable {
-public:
-    FilterTable(const std::string& map_path, uint merge_zoom = 22, uint max_zoom = 22);
-    FilterTable(const mapnik::Map& map, uint merge_zoom = 22, uint max_zoom = 22);
+public:    
+    using zoom_groups_t = std::set<uint>;
+    using filter_map_t = std::unordered_map<std::string, mapnik::expression_ptr>;
 
-    bool GetFilter(uint zoom, const std::string& layer_name, mapnik::expression_ptr* result) const noexcept;
+    static std::unique_ptr<FilterTable> MakeFilterTable(const std::string& map_path,
+                                                        const zoom_groups_t* zoom_groups = nullptr,
+                                                        int zoom_offset = 0, uint min_zoom = 0,
+                                                        uint max_zoom = 22);
 
-    inline uint merge_zoom() const noexcept {
-        return merge_zoom_;
+    static std::unique_ptr<FilterTable> MakeFilterTable(const mapnik::Map& map,
+                                                        const zoom_groups_t* zoom_groups = nullptr,
+                                                        int zoom_offset = 0, uint min_zoom = 0,
+                                                        uint max_zoom = 22);
+
+    const filter_map_t* GetFiltersMap(uint zoom) const noexcept;
+
+    inline zoom_groups_t* zoom_groups() const noexcept {
+        return zoom_groups_;
     }
 
     inline uint max_zoom() const noexcept {
@@ -22,17 +30,13 @@ public:
     }
 
 private:
-    void ParseMap(const mapnik::Map& map);
-    mapnik::expression_ptr MergeFilters(const std::vector<mapnik::expression_ptr>& filters) const noexcept;
+    FilterTable(int zoom_offset, uint min_zoom = 0, uint max_zoom = 22);
 
-    inline mapnik::expression_ptr MergeFilters(const mapnik::expression_ptr& filter1,
-                                               const mapnik::expression_ptr& filter2) const noexcept {
-        mapnik::binary_node<mapnik::tags::logical_or> new_filter(*filter1, *filter2);
-        return std::make_shared<mapnik::expr_node>(std::move(new_filter));
-    }
+    void ParseMap(const mapnik::Map& map, const zoom_groups_t* zoom_groups);
 
-    using collumn_t = std::map<std::string, mapnik::expression_ptr>;
-    std::vector<collumn_t> filter_table_;
+    std::map<uint, filter_map_t> filter_table_;
+    const int zoom_offset_;
+    const uint min_zoom_;
     const uint max_zoom_;
-    const uint merge_zoom_;
+    zoom_groups_t* zoom_groups_{nullptr};
 };

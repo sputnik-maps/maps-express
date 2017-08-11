@@ -26,6 +26,13 @@ private:
     HttpHandlerFactory& hhf_;
 };
 
+static FilterTable::zoom_groups_t MakeZoomGroups(uint min_z, uint max_z) {
+    FilterTable::zoom_groups_t zoom_groups;
+    for (uint i = min_z; i < max_z + 1; ++i) {
+        zoom_groups.insert(i);
+    }
+    return zoom_groups;
+}
 
 static std::shared_ptr<endpoints_map_t> ParseEndpoints(const Json::Value jendpoints,
                                                        DataManager& data_manager) {
@@ -86,7 +93,10 @@ static std::shared_ptr<endpoints_map_t> ParseEndpoints(const Json::Value jendpoi
                 }
                 const std::string filter_map_path = FromJson<std::string>(jparams["filter_map"], "");
                 if (!filter_map_path.empty()) {
-                    params->filter_table = std::make_shared<FilterTable>(filter_map_path, params->maxzoom);
+                    static const FilterTable::zoom_groups_t zoom_groups = MakeZoomGroups(
+                                params->minzoom, params->maxzoom);
+                    params->filter_table = FilterTable::MakeFilterTable(filter_map_path, &zoom_groups,
+                                                                        1, params->minzoom);
                 }
             } else {
                 LOG(ERROR) << "Invalid type '" << type << "' for endpoint '" << endpoint_path << "' provided!";

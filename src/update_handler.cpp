@@ -95,7 +95,7 @@ bool UpdateHandler::UpdateMvt(std::shared_ptr<std::string> new_style, uint zoom)
                     return false;
                 }
             }
-            ep->filter_table.reset(new FilterTable(*map, ep->filter_table->merge_zoom()));
+            ep->filter_table = FilterTable::MakeFilterTable(*map, ep->filter_table->zoom_groups(), 1, ep->minzoom);
             if (exact_zoom) {
                 return true;
             }

@@ -12,6 +12,7 @@
 #include <mapnik/box2d.hpp>
 #include <mapnik/box2d_impl.hpp>
 #include <mapnik/geometry.hpp>
+#include <mapnik/unicode.hpp>
 
 #include <vector_tile_datasource_pbf.hpp>
 #include <vector_tile_geometry_decoder.hpp>
@@ -150,8 +151,8 @@ private:
 
 class Subtiler {
 public:
-    Subtiler(const Tile& base_tile, const std::shared_ptr<FilterTable> filter_table = nullptr);
-    Subtiler(Tile&& base_tile, const std::shared_ptr<FilterTable> filter_table = nullptr);
+    Subtiler(const Tile& base_tile, std::shared_ptr<const FilterTable> filter_table = nullptr);
+    Subtiler(Tile&& base_tile, std::shared_ptr<const FilterTable> filter_table = nullptr);
 
     std::string MakeSubtile(const TileId& target_tile_id,
                             uint target_extent = 4096, int buffer_size = 16,
@@ -232,7 +233,7 @@ private:
     int target_offset_y_;
     int zoom_factor_;
 
-    const std::shared_ptr<FilterTable> filter_table_;
+    std::shared_ptr<const FilterTable> filter_table_;
     mapnik::expression_ptr layer_filter_;
     std::vector<std::string> layer_keys_;
     mapnik::vector_tile_impl::layer_pbf_attr_type layer_values_;
