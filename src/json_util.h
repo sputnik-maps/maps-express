@@ -125,14 +125,22 @@ inline T FromJson(const Json::Value& jvalue, const T& default_value) {
     return detail::from_json<T>(jvalue);
 }
 
-
 template <typename T>
-inline optional<T> FromJsonOrErr(const Json::Value& jvalue, const std::string& err_string) {
+inline optional<T> FromJson(const Json::Value& jvalue) {
     if (!detail::validate<T>(jvalue)) {
-        LOG(ERROR) << err_string;
         return nullopt;
     }
     return detail::from_json<T>(jvalue);
+}
+
+
+template <typename T>
+inline optional<T> FromJsonOrErr(const Json::Value& jvalue, const std::string& err_string) {
+    auto val = FromJson<T>(jvalue);
+    if (!val) {
+        LOG(ERROR) << err_string;
+    }
+    return val;
 }
 
 } // ns json_util

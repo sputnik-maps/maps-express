@@ -28,7 +28,7 @@ private:
 
 static FilterTable::zoom_groups_t MakeZoomGroups(uint min_z, uint max_z) {
     FilterTable::zoom_groups_t zoom_groups;
-    for (uint i = min_z; i < max_z + 1; ++i) {
+    for (uint i = min_z; i <= max_z; ++i) {
         zoom_groups.insert(i);
     }
     return zoom_groups;
@@ -91,12 +91,13 @@ static std::shared_ptr<endpoints_map_t> ParseEndpoints(const Json::Value jendpoi
                     LOG(ERROR) << "No data provider for endpoint '" << endpoint_path << "' specified!";
                     continue;
                 }
-                const std::string filter_map_path = FromJson<std::string>(jparams["filter_map"], "");
-                if (!filter_map_path.empty()) {
-                    static const FilterTable::zoom_groups_t zoom_groups = MakeZoomGroups(
-                                params->minzoom, params->maxzoom);
-                    params->filter_table = FilterTable::MakeFilterTable(filter_map_path, &zoom_groups,
-                                                                        1, params->minzoom);
+                auto filter_map_path = FromJson<std::string>(jparams["filter_map"]);
+                if (filter_map_path) {
+                    uint last_zoom = FromJson<uint>(jparams["last_zoom"], params->maxzoom);
+                    uint max_zoom_group = last_zoom == params->maxzoom ? last_zoom - 1 : last_zoom;
+                    FilterTable::zoom_groups_t zoom_groups = MakeZoomGroups(params->minzoom, max_zoom_group);
+                    params->filter_table = FilterTable::MakeFilterTable(*filter_map_path, &zoom_groups,
+                                                                        1, params->minzoom, last_zoom);
                 }
             } else {
                 LOG(ERROR) << "Invalid type '" << type << "' for endpoint '" << endpoint_path << "' provided!";

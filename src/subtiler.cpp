@@ -46,10 +46,9 @@ std::string Subtiler::MakeSubtile(const TileId& target_tile_id,
 
     const FilterTable::filter_map_t* filter_map = nullptr;
     if (filter_table_) {
-        uint base_z = base_tile_.id.z;
-        filter_map = filter_table_->GetFiltersMap(base_z);
+        filter_map = filter_table_->GetFiltersMap(target_tile_id.z);
         if (!filter_map) {
-            LOG(ERROR) << "Filter map not found for zoom: " << std::to_string(base_z);
+            LOG(ERROR) << "Filter map not found for zoom: " << std::to_string(target_tile_id.z);
             return "";
         }
     }
