@@ -93,9 +93,8 @@ static std::shared_ptr<endpoints_map_t> ParseEndpoints(const Json::Value jendpoi
                 }
                 auto filter_map_path = FromJson<std::string>(jparams["filter_map"]);
                 if (filter_map_path) {
-                    uint last_zoom = FromJson<uint>(jparams["last_zoom"], params->maxzoom);
-                    uint max_zoom_group = last_zoom == params->maxzoom ? last_zoom - 1 : last_zoom;
-                    FilterTable::zoom_groups_t zoom_groups = MakeZoomGroups(params->minzoom, max_zoom_group);
+                    uint last_zoom = FromJson<uint>(jparams["last_zoom"], params->maxzoom + 1);
+                    FilterTable::zoom_groups_t zoom_groups = MakeZoomGroups(params->minzoom, params->maxzoom);
                     params->filter_table = FilterTable::MakeFilterTable(*filter_map_path, &zoom_groups,
                                                                         1, params->minzoom, last_zoom);
                 }
