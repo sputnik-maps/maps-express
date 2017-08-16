@@ -18,9 +18,10 @@
 #include <vector_tile_config.hpp>
 #include <vector_tile_datasource_pbf.hpp>
 
+#include <mapbox2mapnik/mapbox2mapnik.hpp>
+
 #include "cached_datasource.h"
 #include "load_map.h"
-#include "load_mvt_map.h"
 #include "subtiler.h"
 #include "utfgrid_encode.h"
 
@@ -55,12 +56,12 @@ std::shared_ptr<RenderWorker::MapInfo> RenderWorker::LoadStyle(const StyleInfo& 
     mapnik::Map& map = map_info->map;
     try {
         if (!style_info.path.empty()) {
-            me::load_map(map, style_info.path);
+            sputnik::load_map(map, style_info.path);
         } else if (style_info.data && !style_info.data->empty()){
             if (style_info.type == StyleInfo::Type::mapnik) {
                 mapnik::load_map_string(map, *style_info.data, false, style_info.base_path);
             } else {
-                load_mvt_map_string(map, *style_info.data, false, style_info.base_path);
+                sputnik::load_mapbox_map_string(map, *style_info.data, false, style_info.base_path);
             }
         } else {
             LOG(ERROR) << "No style path, nor style data provided!";

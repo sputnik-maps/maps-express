@@ -2,7 +2,7 @@
 
 #include <mapnik/map.hpp>
 
-namespace me {
+namespace sputnik {
 
 void load_map(mapnik::Map & map, std::string const& filename, bool strict = false, std::string base_path="");
 

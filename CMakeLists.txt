@@ -49,6 +49,7 @@ target_link_libraries(maps-express
       -lboost_system
       -lboost_filesystem
       -lcouchbase
+      -lmapbox2mapnik
 )
 
 install(TARGETS maps-express DESTINATION /opt/sputnik/maps/maps-express/)

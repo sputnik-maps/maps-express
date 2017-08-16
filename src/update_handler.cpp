@@ -89,7 +89,7 @@ bool UpdateHandler::UpdateMvt(std::shared_ptr<std::string> new_style, uint zoom)
             if (!map) {
                 map = std::make_unique<mapnik::Map>();
                 try {
-                    me::load_map_string(*map, *new_style, false, map_base_path_, mvt_map_);
+                    sputnik::load_map_string(*map, *new_style, false, map_base_path_, mvt_map_);
                 } catch (const std::exception& e) {
                     LOG(ERROR) << "Error while updating map: " << e.what();
                     return false;

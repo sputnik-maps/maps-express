@@ -4,9 +4,9 @@
 
 #include <mapnik/load_map.hpp>
 
-#include "load_mvt_map.h"
+#include <mapbox2mapnik/mapbox2mapnik.hpp>
 
-namespace me {
+namespace sputnik {
 
 void load_map(mapnik::Map & map, std::string const& filename, bool strict, std::string base_path) {
     auto path_len = filename.size();
@@ -14,7 +14,7 @@ void load_map(mapnik::Map & map, std::string const& filename, bool strict, std::
         throw std::runtime_error("Invalid map path: " + filename);
     }
     if (filename.substr(path_len - 5) == ".json") {
-        load_mvt_map(map, filename, strict, base_path);
+        sputnik::load_mapbox_map(map, filename, strict, base_path);
     } else {
         mapnik::load_map(map, filename, strict, base_path);
     }

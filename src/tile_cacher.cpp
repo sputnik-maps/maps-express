@@ -3,6 +3,8 @@
 #include <folly/io/async/EventBaseManager.h>
 
 
+static const auto kTmpCacheTTL = std::chrono::seconds(60);
+
 TileCacher::~TileCacher() {
 // TODO: maybe notify all waiters
 }
@@ -48,6 +50,7 @@ void TileCacher::Set(const std::string& key, std::shared_ptr<const CachedTile> c
     {
         std::lock_guard<std::mutex> lock(mux_);
         tmp_cache_[key] = cached_tile;
+        keys_to_remove_.emplace_back(key, std::chrono::system_clock::now() + kTmpCacheTTL);
         auto set_waiters_itr = set_waiters_.find(key);
         if (set_waiters_itr != set_waiters_.end()) {
             waiters_vec = std::move(set_waiters_itr->second);
@@ -58,13 +61,7 @@ void TileCacher::Set(const std::string& key, std::shared_ptr<const CachedTile> c
         get_task->SetResult(cached_tile);
     }
     SetImpl(key, cached_tile, expire_time);
-    folly::EventBase* evb = folly::EventBaseManager::get()->getExistingEventBase();
-    if (evb) {
-        evb->runAfterDelay([this, key]{
-            std::lock_guard<std::mutex> lock(mux_);
-            tmp_cache_.erase(key);
-        }, 60000);
-    }
+    ClearTmpCache();
 }
 
 void TileCacher::Touch(const std::string& key, std::chrono::seconds expire_time) {
@@ -120,14 +117,14 @@ void TileCacher::OnTileRetrieved(const std::string& key, std::shared_ptr<CachedT
             return;
         }
         tmp_cache_[key] = cached_tile;
+        keys_to_remove_.emplace_back(key, std::chrono::system_clock::now() + kTmpCacheTTL);
         waiters = std::move(waiters_itr->second);
         get_waiters_.erase(waiters_itr);
     }
     for (auto& async_task : waiters) {
         async_task->SetResult(cached_tile);
     }
-    std::lock_guard<std::mutex> lock(mux_);
-    tmp_cache_.erase(key);
+    ClearTmpCache();
 }
 
 void TileCacher::OnRetrieveError(const std::string& key) {
@@ -152,4 +149,16 @@ void TileCacher::OnTileSet(const std::string& key) {
 
 void TileCacher::OnSetError(const std::string& key) {
     // TODO;
+}
+
+void TileCacher::ClearTmpCache() {
+    std::lock_guard<std::mutex> lock(mux_);
+    auto now = std::chrono::system_clock::now();
+    for (const auto& key_time_pair : keys_to_remove_) {
+        if (key_time_pair.second > now) {
+            break;
+        }
+        tmp_cache_.erase(key_time_pair.first);
+        keys_to_remove_.pop_front();
+    }
 }

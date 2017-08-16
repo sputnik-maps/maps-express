@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -50,12 +51,15 @@ private:
                          std::chrono::seconds expire_time) = 0;
     virtual void TouchImpl(const std::string& key, std::chrono::seconds expire_time) = 0;
 
+    void ClearTmpCache();
+
     using tmp_cache_t = std::unordered_map<std::string, std::shared_ptr<const CachedTile>>;
     using waiters_vec_t = std::vector<std::shared_ptr<GetTask>>;
 
     std::unordered_map<std::string, waiters_vec_t> get_waiters_;
     std::unordered_map<std::string, waiters_vec_t> set_waiters_;
     tmp_cache_t tmp_cache_;
+    std::list<std::pair<std::string, std::chrono::system_clock::time_point>> keys_to_remove_;
     std::mutex mux_;
     std::mutex tmp_cache_mux_;
 };

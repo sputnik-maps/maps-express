@@ -40,7 +40,7 @@ std::unique_ptr<FilterTable> FilterTable::MakeFilterTable(const std::string& map
                                                           int zoom_offset, uint min_zoom, uint max_zoom) {
     mapnik::Map map;
     try {
-        me::load_map(map, map_path);
+        sputnik::load_map(map, map_path);
     } catch (const std::exception& e) {
         LOG(ERROR) << "Error while loading map " << map_path << ": " << e.what();
         return nullptr;
