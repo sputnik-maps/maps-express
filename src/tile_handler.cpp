@@ -8,6 +8,8 @@
 #include <proxygen/httpserver/ResponseBuilder.h>
 #include <proxygen/lib/http/HTTPConnector.h>
 
+#include <vector_tile_compression.hpp>
+
 #include "data_provider.h"
 #include "session_wrapper.h"
 #include "util.h"
@@ -419,6 +421,7 @@ void TileHandler::LockCacheAndGenerateTile() {
     // in case when TileHandler was destroyed due to timeout
     auto tile_task = std::make_shared<TileProcessor::TileTask>(
             [response_task, cacher_lock, cacher = cacher_, request_info_str = request_info_str_,
+             endpoint_type = tile_request_->endpoint_params->type,
              tile_id = tile_request_->tile_id, tile_processor = tile_processor_, start_time]
                 (Metatile&& metatile) {
         auto stop_time = std::chrono::system_clock::now();
@@ -427,12 +430,24 @@ void TileHandler::LockCacheAndGenerateTile() {
         cacher_lock->Cancel();
         bool response_sent = false;
         for (Tile& tile : metatile.tiles) {
+            std::string tile_data;
+            if (endpoint_type == EndpointType::mvt) {
+                try {
+                    mapnik::vector_tile_impl::zlib_compress(tile.data, tile_data, true, 5);
+                } catch (const std::runtime_error& e) {
+                    LOG(ERROR) << e.what();
+                    tile_data = std::move(tile.data);
+                }
+            } else {
+                tile_data = std::move(tile.data);
+            }
+
             if (!response_sent && tile.id == tile_id) {
-                response_task->SetResult(tile.data);
+                response_task->SetResult(tile_data);
                 response_sent = true;
             }
             // TODO: Calculate cache policy
-            auto cached_tile = std::make_shared<CachedTile>(CachedTile{std::move(tile.data)});
+            auto cached_tile = std::make_shared<CachedTile>(CachedTile{std::move(tile_data)});
             cacher->Set(MakeCacherKey(tile.id, request_info_str), cached_tile,
                          TTLPolicyToSeconds(cached_tile->policy), nullptr);
         }

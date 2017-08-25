@@ -25,6 +25,7 @@ void BaseHandler::SendError(uint16_t err_code) {
     error_sent_ = true;
     proxygen::ResponseBuilder(downstream_)
             .status(err_code, util::http_status_msg(err_code))
+            .header("access-control-allow-origin", "*")
             .sendWithEOM();
     OnErrorSent(err_code);
 }
