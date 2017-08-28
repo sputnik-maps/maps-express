@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "async_task.h"
+#include "lru_cache.h"
 
 
 struct CachedTile {
@@ -31,6 +32,7 @@ public:
     using GetTask = AsyncTask<std::shared_ptr<const CachedTile>>;
     using SetTask = AsyncTask<bool>;
 
+    TileCacher(std::size_t tmp_cache_capacity = 500);
     virtual ~TileCacher();
 
     void Get(const std::string& key, std::shared_ptr<GetTask> task);
@@ -51,9 +53,7 @@ private:
                          std::chrono::seconds expire_time) = 0;
     virtual void TouchImpl(const std::string& key, std::chrono::seconds expire_time) = 0;
 
-    void ClearTmpCache();
-
-    using tmp_cache_t = std::unordered_map<std::string, std::shared_ptr<const CachedTile>>;
+    using tmp_cache_t = LRUCache<std::shared_ptr<const CachedTile>>;
     using waiters_vec_t = std::vector<std::shared_ptr<GetTask>>;
 
     std::unordered_map<std::string, waiters_vec_t> get_waiters_;

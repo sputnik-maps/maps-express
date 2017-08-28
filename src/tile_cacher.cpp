@@ -3,7 +3,7 @@
 #include <folly/io/async/EventBaseManager.h>
 
 
-static const auto kTmpCacheTTL = std::chrono::seconds(60);
+TileCacher::TileCacher(std::size_t tmp_cache_capacity) : tmp_cache_(tmp_cache_capacity) {}
 
 TileCacher::~TileCacher() {
 // TODO: maybe notify all waiters
@@ -14,11 +14,10 @@ void TileCacher::Get(const std::string& key, std::shared_ptr<GetTask> task) {
     {
         std::unique_lock<std::mutex> lock(mux_);
         // First check tmp chache
-        auto tmp_cache_itr = tmp_cache_.find(key);
-        if (tmp_cache_itr != tmp_cache_.end()) {
-            auto tile = tmp_cache_itr->second;
+        auto tile = tmp_cache_.Get(key);
+        if (tile) {
             lock.unlock();
-            task->SetResult(std::move(tile));
+            task->SetResult(std::move(*tile));
             return;
         }
         // Check if this tile was locked until set operation
@@ -49,8 +48,7 @@ void TileCacher::Set(const std::string& key, std::shared_ptr<const CachedTile> c
     waiters_vec_t waiters_vec;
     {
         std::lock_guard<std::mutex> lock(mux_);
-        tmp_cache_[key] = cached_tile;
-        keys_to_remove_.emplace_back(key, std::chrono::system_clock::now() + kTmpCacheTTL);
+        tmp_cache_.Set(key, cached_tile);
         auto set_waiters_itr = set_waiters_.find(key);
         if (set_waiters_itr != set_waiters_.end()) {
             waiters_vec = std::move(set_waiters_itr->second);
@@ -61,7 +59,6 @@ void TileCacher::Set(const std::string& key, std::shared_ptr<const CachedTile> c
         get_task->SetResult(cached_tile);
     }
     SetImpl(key, cached_tile, expire_time);
-    ClearTmpCache();
 }
 
 void TileCacher::Touch(const std::string& key, std::chrono::seconds expire_time) {
@@ -109,22 +106,19 @@ void TileCacher::Unlock(const std::vector<std::string>& keys) {
 
 void TileCacher::OnTileRetrieved(const std::string& key, std::shared_ptr<CachedTile> cached_tile) {
     waiters_vec_t waiters;
-    tmp_cache_t::iterator tmp_cache_itr;
     {
         std::lock_guard<std::mutex> lock(mux_);
         auto waiters_itr = get_waiters_.find(key);
         if (waiters_itr == get_waiters_.end()) {
             return;
         }
-        tmp_cache_[key] = cached_tile;
-        keys_to_remove_.emplace_back(key, std::chrono::system_clock::now() + kTmpCacheTTL);
+        tmp_cache_.Set(key, cached_tile);
         waiters = std::move(waiters_itr->second);
         get_waiters_.erase(waiters_itr);
     }
     for (auto& async_task : waiters) {
         async_task->SetResult(cached_tile);
     }
-    ClearTmpCache();
 }
 
 void TileCacher::OnRetrieveError(const std::string& key) {
@@ -149,16 +143,4 @@ void TileCacher::OnTileSet(const std::string& key) {
 
 void TileCacher::OnSetError(const std::string& key) {
     // TODO;
-}
-
-void TileCacher::ClearTmpCache() {
-    std::lock_guard<std::mutex> lock(mux_);
-    auto now = std::chrono::system_clock::now();
-    for (const auto& key_time_pair : keys_to_remove_) {
-        if (key_time_pair.second > now) {
-            break;
-        }
-        tmp_cache_.erase(key_time_pair.first);
-        keys_to_remove_.pop_front();
-    }
 }
