@@ -87,6 +87,9 @@ void FilterTable::ParseMap(const mapnik::Map &map, const zoom_groups_t* zoom_gro
         const auto& styles = map.styles();
         for (const mapnik::layer& layer : map.layers()) {
             const std::string& lyr_name = layer.name();
+            if (lyr_name.empty()) {
+                continue;
+            }
             LayerFilters& layer_filters = filters[lyr_name];
             if (layer_filters.no_filters) {
                 continue;
@@ -125,7 +128,7 @@ void FilterTable::ParseMap(const mapnik::Map &map, const zoom_groups_t* zoom_gro
             const LayerFilters& layer_filters = layer_itr->second;
             if (layer_filters.no_filters) {
                 filters_map[layer_name] = nullptr;
-            } else {
+            } else if (!layer_filters.filters.empty()){
                 filters_map[layer_name] = MergeFilters(layer_filters.filters);
             }
         }
