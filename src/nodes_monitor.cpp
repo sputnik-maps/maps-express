@@ -11,7 +11,7 @@ using std::experimental::nullopt;
 const std::string kNodesKey = "nodes";
 
 NodesMonitor::NodesMonitor(const std::string& host, uint port, std::shared_ptr<EtcdClient> etcd_client) :
-        self_addr_{folly::SocketAddress(host, port, false), true},
+        self_addr_{folly::SocketAddress(host, port, true), true},
         etcd_client_(std::move(etcd_client)),
         evb_(etcd_client_->get_event_base())
 {
