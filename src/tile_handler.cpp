@@ -481,7 +481,9 @@ void TileHandler::SendResponse(std::string tile_data) noexcept {
         rb.header("Content-Type", "image/png");
     } else if (ext_ == ExtensionType::mvt) {
         rb.header("Content-Type", "application/x-protobuf");
-        rb.header("Content-Encoding", "deflate");
+        if (mapnik::vector_tile_impl::is_gzip_compressed(tile_data)) {
+            rb.header("Content-Encoding", "gzip");
+        }
     } else if (ext_ == ExtensionType::json) {
         rb.header("Content-Type", "application/json");
     } else if (ext_ == ExtensionType::html) {
