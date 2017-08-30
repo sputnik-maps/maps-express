@@ -100,7 +100,11 @@ void CassandraLoader::Load(std::shared_ptr<LoadTask> task, const TileId& tile_id
         task->NotifyError(LoadError::internal_error);
         return;
     }
-    const std::string& keyspace = version;
+    if (versions_.empty()) {
+        task->NotifyError(LoadError::not_found);
+        return;
+    }
+    const std::string& keyspace = version.empty() ? versions_.back() : version;
     int idx = xy_to_index(tile_id.x, tile_id.y);
     int block = idx / 32768;
     std::stringstream cql_statment;
