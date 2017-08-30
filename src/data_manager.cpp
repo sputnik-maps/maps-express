@@ -28,7 +28,7 @@ DataManager::DataManager(Config& config) : config_(config) {
         }
         const Json::Value& loader_params = *loader;
 
-        const Json::Value& jversions = loader_params["version"];
+        const Json::Value& jversions = loader_params["versions"];
         std::vector<std::string> versions;
         if (jversions.isArray()) {
             for (const Json::Value& jversion : jversions) {
@@ -38,6 +38,9 @@ DataManager::DataManager(Config& config) : config_(config) {
                 }
                 versions.push_back(jversion.asString());
             }
+        }
+        if (versions.empty()) {
+            LOG(WARNING) << "No versions for loader " << loader_name << " provided!";
         }
         std::string loader_type = loader_params.get("type", "").asString();
         if (loader_type == "cassandra") {

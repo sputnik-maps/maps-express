@@ -100,15 +100,14 @@ void CassandraLoader::Load(std::shared_ptr<LoadTask> task, const TileId& tile_id
         task->NotifyError(LoadError::internal_error);
         return;
     }
-    if (versions_.empty()) {
+    if (!HasVersion(version)) {
         task->NotifyError(LoadError::not_found);
         return;
     }
-    const std::string& keyspace = version.empty() ? versions_.back() : version;
     int idx = xy_to_index(tile_id.x, tile_id.y);
     int block = idx / 32768;
     std::stringstream cql_statment;
-    cql_statment << "SELECT tile FROM " << keyspace << "." << table_
+    cql_statment << "SELECT tile FROM " << version << "." << table_
             << " WHERE idx=" << idx << " AND zoom=" << tile_id.z << " AND  block=" << block << ";";
     CassStatement* statement
       = cass_statement_new(cql_statment.str().c_str(), 0);
