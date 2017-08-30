@@ -9,8 +9,8 @@
 class CassandraLoader : public TileLoader {
 public:
     CassandraLoader(const std::string& contact_points,
-                    const std::string& keyspace,
                     const std::string& table,
+                    std::vector<std::string> versions,
                     uint workers);
 
     virtual ~CassandraLoader();
@@ -33,8 +33,7 @@ private:
     CassCluster* cluster_;
     CassSession* session_;
 
-    std::string keyspace_;
+    std::vector<std::string> versions_;
     std::string table_;
     std::unique_ptr<std::thread> connect_thread_;
-    bool auto_keyspace_{false};
 };

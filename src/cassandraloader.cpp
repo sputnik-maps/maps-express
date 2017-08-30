@@ -8,15 +8,12 @@
 #include "util.h"
 
 CassandraLoader::CassandraLoader(const std::string& contact_points,
-                                 const std::string& keyspace,
                                  const std::string& table,
+                                 std::vector<std::string> versions,
                                  uint workers) :
-        keyspace_(keyspace),
+        versions_(std::move(versions)),
         table_(table)
 {
-    if (keyspace == "auto") {
-        auto_keyspace_ = true;
-    }
     cluster_ = cass_cluster_new();
     session_ = cass_session_new();
     cass_cluster_set_num_threads_io(cluster_, workers);
@@ -103,11 +100,7 @@ void CassandraLoader::Load(std::shared_ptr<LoadTask> task, const TileId& tile_id
         task->NotifyError(LoadError::internal_error);
         return;
     }
-    const std::string& keyspace = auto_keyspace_ ? version : keyspace_;
-    if (!auto_keyspace_ && keyspace.empty()) {
-        task->NotifyError(LoadError::internal_error);
-        return;
-    }
+    const std::string& keyspace = version;
     int idx = xy_to_index(tile_id.x, tile_id.y);
     int block = idx / 32768;
     std::stringstream cql_statment;
@@ -123,8 +116,12 @@ void CassandraLoader::Load(std::shared_ptr<LoadTask> task, const TileId& tile_id
 }
 
 bool CassandraLoader::HasVersion(const std::string& version) const {
-    // TODO: Implement
-    return true;
+    for (const std::string& v : versions_) {
+        if (v == version) {
+            return true;
+        }
+    }
+    return false;
 }
 
 int CassandraLoader::xy_to_index(int x, int y) {

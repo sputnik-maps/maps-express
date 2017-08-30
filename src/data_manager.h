@@ -25,8 +25,10 @@ private:
     using providers_map_t = std::unordered_map<std::string, std::shared_ptr<DataProvider>>;
 
     void AddDataProvider(const std::string& provider_name, const Json::Value& jprovider_params);
-    void AddCassandraLoader(const std::string& loader_name, const Json::Value& jloader_params);
-    void AddFileLoader(const std::string& loader_name, const Json::Value& jloader_params);
+    void AddCassandraLoader(const std::string& loader_name, const Json::Value& jloader_params,
+                            std::vector<std::string> versions);
+    void AddFileLoader(const std::string& loader_name, const Json::Value& jloader_params,
+                       std::vector<std::string> versions);
 
     loaders_map_t loaders_map_;
     providers_map_t providers_map_;

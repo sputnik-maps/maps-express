@@ -22,12 +22,28 @@ DataManager::DataManager(Config& config) : config_(config) {
     const Json::Value& jloaders = jdata["loaders"];
     for (auto loader = jloaders.begin(); loader != jloaders.end(); ++loader) {
         const std::string loader_name = loader.key().asString();
+        if (loaders_map_.find(loader_name) != loaders_map_.end()) {
+            LOG(ERROR) << "Duplicate loader name: " << loader_name;
+            continue;
+        }
         const Json::Value& loader_params = *loader;
+
+        const Json::Value& jversions = loader_params["version"];
+        std::vector<std::string> versions;
+        if (jversions.isArray()) {
+            for (const Json::Value& jversion : jversions) {
+                if (!jversion.isString()) {
+                    LOG(ERROR) << "Data version must have string type!";
+                    continue;
+                }
+                versions.push_back(jversion.asString());
+            }
+        }
         std::string loader_type = loader_params.get("type", "").asString();
         if (loader_type == "cassandra") {
-            AddCassandraLoader(loader_name, loader_params);
+            AddCassandraLoader(loader_name, loader_params, std::move(versions));
         } else if (loader_type == "file") {
-            AddFileLoader(loader_name, loader_params);
+            AddFileLoader(loader_name, loader_params, std::move(versions));
         } else {
             LOG(ERROR) << "Invalid loader type: " << loader_type;
         }
@@ -84,21 +100,12 @@ void DataManager::AddDataProvider(const std::string& provider_name, const Json::
     providers_map_.emplace(provider_name, std::move(provider));
 }
 
-void DataManager::AddCassandraLoader(const std::string &loader_name, const Json::Value &jloader_params) {
-    if (loaders_map_.find(loader_name) != loaders_map_.end()) {
-        LOG(ERROR) << "Duplicate loader name: " << loader_name;
-        return;
-    }
-
+void DataManager::AddCassandraLoader(const std::string &loader_name, const Json::Value &jloader_params,
+                                     std::vector<std::string> versions) {
     int nworkers = jloader_params.get("workers", 32).asInt();
     if (nworkers < 0) {
         LOG(INFO) << "Number of workers must be positive integer" << std::endl;
         nworkers = 32;
-    }
-    const std::string keyspace = jloader_params.get("keyspace", "auto").asString();
-    if (keyspace.empty()) {
-        LOG(ERROR) << "Loader " << loader_name << " has empty keyspace. Skipping!";
-        return;
     }
     const std::string table = jloader_params.get("table", "tiles").asString();
     const std::string contact_points = jloader_params.get("contact points", "").asString();
@@ -107,12 +114,13 @@ void DataManager::AddCassandraLoader(const std::string &loader_name, const Json:
         return;
     }
 
-    auto cassandra_loader = std::make_shared<CassandraLoader>(contact_points, keyspace, table, nworkers);
+    auto cassandra_loader = std::make_shared<CassandraLoader>(contact_points, table, std::move(versions), nworkers);
     loaders_map_[loader_name] = std::move(cassandra_loader);
 }
 
 
-void DataManager::AddFileLoader(const std::string& loader_name, const Json::Value& jloader_params) {
+void DataManager::AddFileLoader(const std::string& loader_name, const Json::Value& jloader_params,
+                                std::vector<std::string> versions) {
     if (loaders_map_.find(loader_name) != loaders_map_.end()) {
         LOG(ERROR) << "Duplicate loader name: " << loader_name;
         return;
