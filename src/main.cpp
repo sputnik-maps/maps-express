@@ -130,6 +130,8 @@ int main(int argc, char* argv[]) {
         PrintHelpAndExit();
     }
 
+    std::cout << "Host: " << host << " Port: " << http_port << std::endl;
+
     uint internal_http_port;
     if (std::string(argv[3]) == "--internal-port") {
         if (argc < 6) {

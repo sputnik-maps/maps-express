@@ -17,8 +17,8 @@ NodesMonitor::NodesMonitor(const std::string& host, uint port, std::shared_ptr<E
     assert(etcd_client_);
     try {
         self_addr_ = {folly::SocketAddress(host, port, true), true};
-    } catch (const std::runtime_error& e) {
-        LOG(FATAL) << "Failed to resolve self hostname: " << e.what();
+    } catch (const std::system_error& e) {
+        LOG(FATAL) << "Failed to resolve self hostname \"" << host << "\": " << e.what();
     }
     const std::string port_str = std::to_string(port);
     etcd_key_ = kNodesKey + "/";
