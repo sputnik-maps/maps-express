@@ -163,12 +163,15 @@ HttpHandlerFactory::HttpHandlerFactory(Config& config, std::shared_ptr<StatusMon
             std::string user = FromJson<std::string>(jcacher["user"], "");
             std::string password = FromJson<std::string>(jcacher["password"], "");
             uint num_workers = FromJson<uint>(jcacher["workers"], 2);
-            cacher_ = std::make_shared<CouchbaseCacher>(hosts, user, password, num_workers);
+            auto cb_cacher = std::make_shared<CouchbaseCacher>(hosts, user, password, num_workers);
+            cb_cacher->WaitForInit();
+            cacher_ = std::move(cb_cacher);
         };
     }
     if (!cacher_) {
         LOG(INFO) << "Starting without cacher";
     }
+    render_manager_.WaitForInit();
 }
 
 HttpHandlerFactory::~HttpHandlerFactory() {}

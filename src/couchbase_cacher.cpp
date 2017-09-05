@@ -1,5 +1,7 @@
 #include "couchbase_cacher.h"
 
+#include <folly/fibers/Semaphore.h>
+
 
 CouchbaseCacher::CouchbaseCacher(const std::vector<std::string>& hosts, const std::string& user,
                                  const std::string& password, uint num_workers) {
@@ -15,14 +17,20 @@ CouchbaseCacher::CouchbaseCacher(const std::vector<std::string>& hosts, const st
         }
     }
 
+    sem_ = std::make_unique<folly::fibers::Semaphore>(num_workers);
+
     for (uint i = 0; i < num_workers; ++i) {
         auto worker = std::make_unique<CouchbaseWorker>(*this, conn_str, user, password);
-        workers_pool_.PushWorker(std::move(worker));
+        workers_pool_.PushWorker(std::move(worker), [&](workers_pool_t::worker_t*) { sem_->signal(); }, {});
     }
 }
 
 CouchbaseCacher::~CouchbaseCacher() { }
 
+
+void CouchbaseCacher::WaitForInit() {
+    sem_->wait();
+}
 
 void CouchbaseCacher::GetImpl(const std::string& key) {
     CBWorkTask cb_task{nullptr, key, {}, CBWorkTask::Type::get};

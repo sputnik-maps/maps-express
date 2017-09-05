@@ -2,6 +2,8 @@
 
 #include <fstream>
 
+#include <folly/fibers/Semaphore.h>
+
 #include <glog/logging.h>
 
 #include "subtiler.h"
@@ -104,9 +106,11 @@ RenderManager::RenderManager(Config& config) :
     assert(jworkers_ptr);
     const Json::Value& jworkers = *jworkers_ptr;
     uint num_workers = jworkers.isIntegral() ? jworkers.asUInt() : std::thread::hardware_concurrency();
+    sem_ = std::make_unique<folly::fibers::Semaphore>(num_workers);
     for (uint i = 0; i < num_workers; ++i) {
         auto render_worker = std::make_unique<RenderWorker>(styles);
-        render_pool_.PushWorker(std::move(render_worker));
+        render_pool_.PushWorker(std::move(render_worker),
+                                [&](render_pool_t::worker_t*) { sem_->signal(); }, {});
     }
 
     // Check if we already have style updates
@@ -223,4 +227,8 @@ void RenderManager::FinishUpdate() {
     pending_update_.clear();
     updating_ = false;
     TryProcessStyleUpdate();
+}
+
+void RenderManager::WaitForInit() {
+    sem_->wait();
 }
