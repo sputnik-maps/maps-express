@@ -46,7 +46,5 @@ private:
     std::deque<std::unique_ptr<RequestInfo>> pending_requests_;
     folly::EventBase& evb_;
     folly::HHWheelTimer::UniquePtr timer_;
-    std::string host_;
-    uint16_t port_;
     std::atomic_bool stopped_{false};
 };

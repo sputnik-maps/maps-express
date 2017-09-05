@@ -130,8 +130,6 @@ int main(int argc, char* argv[]) {
         PrintHelpAndExit();
     }
 
-    std::cout << "Host: " << host << " Port: " << http_port << std::endl;
-
     uint internal_http_port;
     if (std::string(argv[3]) == "--internal-port") {
         if (argc < 6) {
@@ -177,8 +175,8 @@ int main(int argc, char* argv[]) {
     FLAGS_log_dir = japp["log_dir"].asString().c_str();
 
     std::vector<HTTPServer::IPConfig> IPs = {
-        {SocketAddress(host, static_cast<std::uint16_t>(http_port), true), Protocol::HTTP},
-        {SocketAddress(host, static_cast<std::uint16_t>(internal_http_port), true), Protocol::HTTP},
+        {SocketAddress("0.0.0.0", static_cast<std::uint16_t>(http_port), true), Protocol::HTTP},
+        {SocketAddress("0.0.0.0", static_cast<std::uint16_t>(internal_http_port), true), Protocol::HTTP},
     };
 
     auto monitor = std::make_shared<StatusMonitor>();
@@ -197,11 +195,10 @@ int main(int argc, char* argv[]) {
         .addThen<HttpHandlerFactory>(*config, monitor, std::to_string(internal_http_port), nodes_monitor)
         .build();
 
-    LOG(INFO) << "starting... " << japp["name"].asString() << " " << japp["version"].asString() << std::endl;
+    LOG(INFO) << "starting... Maps Express " << japp["version"].asString() << std::endl;
 
     HTTPServer server(std::move(options));
     server.bind(IPs);
-
 
     // Start HTTPServer mainloop in a separate thread
     std::thread t([&] () {

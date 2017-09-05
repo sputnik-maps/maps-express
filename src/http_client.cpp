@@ -35,10 +35,7 @@ class HTTPWorker : public proxygen::HTTPConnector::Callback,
 public:
     HTTPWorker(folly::EventBase& evb, folly::HHWheelTimer& timer,
                std::deque<std::unique_ptr<RequestInfo>>& pending_requests,
-               const std::string& host, uint16_t port, bool hold_connection);
-    HTTPWorker(folly::EventBase& evb, folly::HHWheelTimer& timer,
-               std::deque<std::unique_ptr<RequestInfo>>& pending_requests,
-               const folly::SocketAddress& addr, bool hold_connection);
+               const std::string& host, uint16_t port);
 
     ~HTTPWorker();
 
@@ -95,32 +92,18 @@ private:
 
 HTTPWorker::HTTPWorker(folly::EventBase& evb, folly::HHWheelTimer& timer,
                        std::deque<std::unique_ptr<RequestInfo>>& pending_requests,
-                       const std::string& host, uint16_t port, bool hold_connection) :
+                       const std::string& host, uint16_t port) :
     connector_(this, &timer),
     evb_(evb),
     timer_(timer),
     pending_requests_(pending_requests),
     host_(host),
     port_(port),
-    hostname_resolved_(false),
-    hold_connection_(hold_connection)
+    hostname_resolved_(false)
 {
-    MaybeProcessNextRequest();
-}
-
-HTTPWorker::HTTPWorker(folly::EventBase& evb, folly::HHWheelTimer& timer,
-                       std::deque<std::unique_ptr<RequestInfo>>& pending_requests,
-                       const folly::SocketAddress& addr, bool hold_connection) :
-    connector_(this, &timer),
-    addr_(addr),
-    evb_(evb),
-    timer_(timer),
-    pending_requests_(pending_requests),
-    host_(addr.getHostStr()),
-    port_(addr.getPort()),
-    hostname_resolved_(true),
-    hold_connection_(hold_connection)
-{
+    if (!host.empty()) {
+        ResolveHostname();
+    }
     MaybeProcessNextRequest();
 }
 
@@ -213,11 +196,7 @@ void HTTPWorker::connectSuccess(HTTPUpstreamSession* session) {
     if (request_info_) {
         SendRequest(session);
     }
-    if (hold_connection_) {
-        session_ = SessionWrapper(session);
-    } else {
-        session->closeWhenIdle();
-    }
+    session->closeWhenIdle();
 }
 
 void HTTPWorker::connectError(const folly::AsyncSocketException& ex) {
@@ -281,20 +260,9 @@ void HTTPWorker::onEgressResumed() noexcept {
 
 
 HTTPClient::HTTPClient(folly::EventBase& evb, const std::string& host, uint16_t port, uint8_t num_workers) :
-    evb_(evb), host_(host), port_(port)
+    evb_(evb)
 {
-    folly::SocketAddress addr;
-    bool hostname_resolved;
-    try {
-        // Note, this does a synchronous DNS lookup
-        addr.setFromHostPort(host, port);
-        hostname_resolved = true;
-    } catch (const std::system_error& e) {
-        LOG(ERROR) << "Failed to resolve hostname \"" << host << "\": " << e.what();
-        hostname_resolved = false;
-    }
-
-    evb_.runImmediatelyOrRunInEventBaseThreadAndWait([&]{
+    evb_.runImmediatelyOrRunInEventBaseThreadAndWait([&, host, port]{
         timer_ = HHWheelTimer::newTimer(
                     &evb,
                     std::chrono::milliseconds(HHWheelTimer::DEFAULT_TICK_INTERVAL),
@@ -302,13 +270,8 @@ HTTPClient::HTTPClient(folly::EventBase& evb, const std::string& host, uint16_t 
                     std::chrono::milliseconds(50000));
 
         for (uint8_t i = 0; i < num_workers; ++i) {
-            if (hostname_resolved) {
-                workers_pool_.push_back(std::make_unique<HTTPWorker>(evb, *timer_, pending_requests_,
-                                                                     addr, false));
-            } else {
-                workers_pool_.push_back(std::make_unique<HTTPWorker>(evb, *timer_, pending_requests_,
-                                                                     host, port, false));
-            }
+            workers_pool_.push_back(std::make_unique<HTTPWorker>(evb_, *timer_, pending_requests_,
+                                                                 host, port));
         }
     });
 }
