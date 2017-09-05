@@ -30,6 +30,7 @@ class Semaphore;
 class RenderManager {
 public:
     RenderManager(Config& config);
+    ~RenderManager();
 
     // If this method is called from event base thread, callbacks will be called in this thread too.
     std::shared_ptr<RenderTask> Render(std::unique_ptr<RenderRequest> request,

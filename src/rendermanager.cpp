@@ -118,6 +118,9 @@ RenderManager::RenderManager(Config& config) :
     TryProcessStyleUpdate();
 }
 
+RenderManager::~RenderManager() {}
+
+
 std::shared_ptr<RenderTask> RenderManager::Render(std::unique_ptr<RenderRequest> request,
                                                   std::function<void (render_result_t&&)> success_callback,
                                                   std::function<void ()> error_callback) {
