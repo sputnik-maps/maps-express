@@ -115,6 +115,16 @@ bool CouchbaseWorker::Init() noexcept {
     crst.v.v3.passwd = password_.c_str();
 
     lcb_create(&cb_instance_, &crst);
+    lcb_install_callback3(cb_instance_, LCB_CALLBACK_GET, GetCallback);
+    lcb_install_callback3(cb_instance_, LCB_CALLBACK_STORE, SetCallback);
+
+    while (!Connect()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+    return true;
+}
+
+bool CouchbaseWorker::Connect() {
     lcb_error_t rc = lcb_connect(cb_instance_);
     if (rc != LCB_SUCCESS) {
        LOG(ERROR) << lcb_strerror(cb_instance_, rc);
@@ -126,8 +136,6 @@ bool CouchbaseWorker::Init() noexcept {
         LOG(ERROR) << lcb_strerror(cb_instance_, rc);
         return false;
     }
-    lcb_install_callback3(cb_instance_, LCB_CALLBACK_GET, GetCallback);
-    lcb_install_callback3(cb_instance_, LCB_CALLBACK_STORE, SetCallback);
     return true;
 }
 

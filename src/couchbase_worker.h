@@ -34,6 +34,7 @@ public:
     void ProcessTask(CBWorkTask task) noexcept override;
 
 private:
+    bool Connect();
     void ProcessGet(const std::string& key) noexcept;
     void ProcessSet(const std::string& key, const CachedTile& tile, std::chrono::seconds expire_time) noexcept;
     void ProcessTouch(const std::string& key, std::chrono::seconds expire_time) noexcept;
