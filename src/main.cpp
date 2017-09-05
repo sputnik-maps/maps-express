@@ -34,8 +34,12 @@ static const std::string kHelpStr = R"help(
 Maps Express.
 
 Usage:
-    maps-express <host>:<port> [--internal-port <port>] json <json-config-path>
-    maps-express <host>:<port> [--internal-port <port>] etcd <etcd-host>
+    maps-express <host>:<port> json <json-config-path> [OPTIONS]
+    maps-express <host>:<port> etcd <etcd-host>  [OPTIONS]
+
+Options:
+    --internal-port <port>  Port for internode communications.
+    --bind-addr <addr>      Bind address.
 )help";
 
 namespace {
@@ -107,55 +111,100 @@ static void PrintHelpAndExit() {
 }
 
 
+struct ProgramOptions {
+    ProgramOptions() = default;
+
+    enum class ConfigType {
+        etcd,
+        json
+    };
+
+    std::string host;
+    std::string bind_addr;
+    std::string config_path;
+    std::uint16_t port{0};
+    std::uint16_t internal_http_port{0};
+    ConfigType config_type;
+};
+
+
+static ProgramOptions ParseProgramOptions(int argc, char* argv[]) {
+    ProgramOptions options;
+    if (argc < 4) {
+        PrintHelpAndExit();
+    }
+
+    const std::string host_port = argv[1];
+    auto del_pos = host_port.find(':');
+    if (del_pos == host_port.npos) {
+        PrintHelpAndExit();
+    }
+    options.host = host_port.substr(0, del_pos);
+    try {
+        options.port = static_cast<std::uint16_t>(std::stoi(host_port.substr(del_pos + 1)));
+    } catch (...) {
+        PrintHelpAndExit();
+    }
+
+    const std::string config_type = argv[2];
+    if (config_type == "json") {
+        options.config_type = ProgramOptions::ConfigType::json;
+    } else if (config_type == "etcd") {
+        options.config_type = ProgramOptions::ConfigType::etcd;
+    } else {
+        std::cout << "Invlid config type: " << config_type << "\n" << std::endl;
+        PrintHelpAndExit();
+    }
+
+    options.config_path = argv[3];
+
+    int argpos = 4;
+    while (argpos < argc) {
+        const std::string opt_name = argv[argpos++];
+        if (opt_name == "--internal-port") {
+            if (argpos == argc) {
+                PrintHelpAndExit();
+            }
+            try {
+                options.internal_http_port = static_cast<std::uint16_t>(std::stoi(argv[argpos++]));
+            } catch (...) {
+                PrintHelpAndExit();
+            }
+        } else if (opt_name == "--bind-addr") {
+            if (argpos == argc) {
+                PrintHelpAndExit();
+            }
+            options.bind_addr = argv[argpos++];
+        } else {
+            std::cout << "Unknow option " << opt_name << std::endl;
+            PrintHelpAndExit();
+        }
+    }
+    if (options.internal_http_port == 0) {
+        options.internal_http_port = options.port + 1;
+    }
+
+    return options;
+}
+
+
 int main(int argc, char* argv[]) {
     std::signal(SIGHUP, signal_handler);
     google::InitGoogleLogging(argv[0]);
     google::InstallFailureSignalHandler();
 
-    if (argc < 4) {
-        PrintHelpAndExit();
-    }
-    const std::string host_port = argv[1];
-    const std::string config_type = argv[2];
-
-    auto del_pos = host_port.find(':');
-    if (del_pos == host_port.npos) {
-        PrintHelpAndExit();
-    }
-    const std::string host = host_port.substr(0, del_pos);
-    uint http_port;
-    try {
-        http_port = static_cast<uint>(std::stoi(host_port.substr(del_pos + 1)));
-    } catch (...) {
-        PrintHelpAndExit();
-    }
-
-    uint internal_http_port;
-    if (std::string(argv[3]) == "--internal-port") {
-        if (argc < 6) {
-            PrintHelpAndExit();
-        }
-        try {
-            internal_http_port = static_cast<uint>(std::stoi(argv[4]));
-        } catch (...) {
-            PrintHelpAndExit();
-        }
-    } else {
-        internal_http_port = http_port + 1;
-    }
+    ProgramOptions p_options = ParseProgramOptions(argc, argv);
 
     std::unique_ptr<JsonConfig> json_config;
     std::unique_ptr<EtcdHelper> etcd_helper;
     Config* config = nullptr;
-    if (config_type == "json") {
-        json_config = std::make_unique<JsonConfig>(argv[3]);
+    if (p_options.config_type == ProgramOptions::ConfigType::json) {
+        json_config = std::make_unique<JsonConfig>(p_options.config_path);
         config = json_config.get();
-    } else if (config_type == "etcd") {
-        etcd_helper = std::make_unique<EtcdHelper>(argv[3], host, internal_http_port);
-        config = &etcd_helper->config;
     } else {
-        std::cout << "Invlid config type: " << config_type << "\n" << std::endl;
-        PrintHelpAndExit();
+        etcd_helper = std::make_unique<EtcdHelper>(p_options.config_path, p_options.host,
+                                                   p_options.internal_http_port);
+        config = &etcd_helper->config;
     }
 
     assert(config);
@@ -174,9 +223,11 @@ int main(int argc, char* argv[]) {
     const Json::Value& japp = *japp_ptr;
     FLAGS_log_dir = japp["log_dir"].asString().c_str();
 
+    const std::string& bind_addr = p_options.bind_addr.empty() ? p_options.host : p_options.bind_addr;
+
     std::vector<HTTPServer::IPConfig> IPs = {
-        {SocketAddress("0.0.0.0", static_cast<std::uint16_t>(http_port), true), Protocol::HTTP},
-        {SocketAddress("0.0.0.0", static_cast<std::uint16_t>(internal_http_port), true), Protocol::HTTP},
+        {SocketAddress(bind_addr, p_options.port, true), Protocol::HTTP},
+        {SocketAddress(bind_addr, p_options.internal_http_port, true), Protocol::HTTP},
     };
 
     auto monitor = std::make_shared<StatusMonitor>();
@@ -192,17 +243,17 @@ int main(int argc, char* argv[]) {
     options.enableContentCompression = true;
     options.contentCompressionLevel = 5;
     options.handlerFactories = proxygen::RequestHandlerChain()
-        .addThen<HttpHandlerFactory>(*config, monitor, std::to_string(internal_http_port), nodes_monitor)
+        .addThen<HttpHandlerFactory>(*config, monitor, std::to_string(p_options.internal_http_port), nodes_monitor)
         .build();
 
-    LOG(INFO) << "starting... Maps Express " << japp["version"].asString() << std::endl;
+    LOG(INFO) << "starting... Maps Express " << kVersion << std::endl;
 
     HTTPServer server(std::move(options));
     server.bind(IPs);
 
     // Start HTTPServer mainloop in a separate thread
     std::thread t([&] () {
-    LOG(INFO) << "running... " << japp["name"].asString() << " " << japp["version"].asString() << std::endl;
+    LOG(INFO) << "running..." << std::endl;
         server.start();
     });
 
