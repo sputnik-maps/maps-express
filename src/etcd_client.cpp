@@ -294,14 +294,15 @@ void EtcdClient::Set(std::shared_ptr<UpdateTask> task, const std::string& key,
         return;
     }
     std::string url = MakeUrl(key);
-    std::string body = "value=" + value;
+    std::string body;
+    if (refresh) {
+        body = "refresh=true&prevExist=true";
+    } else {
+        body = "value=" + value;
+    }
     if (ttl != 0) {
         body.append("&ttl=");
         body.append(std::to_string(ttl));
-        if (refresh) {
-            body.append("&refresh=true");
-            body.append("&prevExist=true");
-        }
     }
     auto body_buf = folly::IOBuf::copyBuffer(body);
     auto http_task = std::make_shared<HTTPTask>([task](http_response_ptr response) {
