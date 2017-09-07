@@ -18,6 +18,8 @@ CassandraLoader::CassandraLoader(const std::string& contact_points,
     session_ = cass_session_new();
     cass_cluster_set_num_threads_io(cluster_, workers);
     cass_cluster_set_contact_points(cluster_, contact_points.c_str());
+    retry_policy_ = cass_retry_policy_downgrading_consistency_new();
+    cass_cluster_set_retry_policy(cluster_, retry_policy_);
     connect_thread_ = std::make_unique<std::thread>([&]{
         CassFuture* connect_future = nullptr;
         while (!connected_) {
@@ -48,6 +50,7 @@ CassandraLoader::~CassandraLoader() {
     cass_future_free(close_future);
     cass_cluster_free(cluster_);
     cass_session_free(session_);
+    cass_retry_policy_free(retry_policy_);
 }
 
 struct TaskWrapper {
@@ -83,10 +86,6 @@ static void ResultCallback(CassFuture* future, void* data) {
         size_t message_length;
         cass_future_error_message(future, &message, &message_length);
         LOG(ERROR) << message;
-        // Handle situation when error casued by specifying invalid version
-//        if (!(result_error == CASS_ERROR_SERVER_INVALID_QUERY && auto_keyspace_)) {
-//            request->error = true;
-//        }
         task_wrapper->task->NotifyError(LoadError::internal_error);
 
     }
@@ -111,6 +110,7 @@ void CassandraLoader::Load(std::shared_ptr<LoadTask> task, const TileId& tile_id
             << " WHERE idx=" << idx << " AND zoom=" << tile_id.z << " AND  block=" << block << ";";
     CassStatement* statement
       = cass_statement_new(cql_statment.str().c_str(), 0);
+    cass_statement_set_consistency(statement, CASS_CONSISTENCY_ONE);
 
     CassFuture* result_future = cass_session_execute(session_, statement);
     cass_statement_free(statement);

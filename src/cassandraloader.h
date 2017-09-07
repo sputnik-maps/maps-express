@@ -32,6 +32,7 @@ private:
 
     CassCluster* cluster_;
     CassSession* session_;
+    CassRetryPolicy* retry_policy_;
 
     std::vector<std::string> versions_;
     std::string table_;
