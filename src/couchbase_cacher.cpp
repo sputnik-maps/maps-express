@@ -3,22 +3,9 @@
 #include <folly/fibers/Semaphore.h>
 
 
-CouchbaseCacher::CouchbaseCacher(const std::vector<std::string>& hosts, const std::string& user,
+CouchbaseCacher::CouchbaseCacher(const std::string& conn_str, const std::string& user,
                                  const std::string& password, uint num_workers) {
-    std::string conn_str;
-    if (hosts.empty()) {
-        conn_str = "couchbase://localhost";
-    } else {
-        auto host_itr = hosts.begin();
-        conn_str = "couchbase://" + *host_itr++;
-        for ( ; host_itr != hosts.end(); ++host_itr) {
-            conn_str.append(",");
-            conn_str.append(*host_itr);
-        }
-    }
-
     sem_ = std::make_unique<folly::fibers::Semaphore>(num_workers);
-
     for (uint i = 0; i < num_workers; ++i) {
         auto worker = std::make_unique<CouchbaseWorker>(*this, conn_str, user, password);
         workers_pool_.PushWorker(std::move(worker), [&](workers_pool_t::worker_t*) { sem_->signal(); }, {});

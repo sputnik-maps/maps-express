@@ -150,23 +150,17 @@ HttpHandlerFactory::HttpHandlerFactory(Config& config, std::shared_ptr<StatusMon
     auto jcacher_ptr = config.GetValue("cacher");
     if (jcacher_ptr) {
         const Json::Value& jcacher = *jcacher_ptr;
-        const Json::Value& jhosts = jcacher["hosts"];
-        if (jhosts.isArray()) {
-            std::vector<std::string> hosts;
-            for (const Json::Value& jhost : jhosts) {
-                if (!jhost.isString()) {
-                    LOG(ERROR) << "Couchbase hostname must be string!";
-                    continue;
-                }
-                hosts.push_back(jhost.asString());
-            }
-            std::string user = FromJson<std::string>(jcacher["user"], "");
-            std::string password = FromJson<std::string>(jcacher["password"], "");
-            uint num_workers = FromJson<uint>(jcacher["workers"], 2);
-            auto cb_cacher = std::make_shared<CouchbaseCacher>(hosts, user, password, num_workers);
-            cb_cacher->WaitForInit();
-            cacher_ = std::move(cb_cacher);
-        };
+        const Json::Value& jconn_str= jcacher["conn_str"];
+        if (!jconn_str.isString()) {
+            LOG(FATAL) << "No connection string for Couchbase provided!";
+        }
+        std::string conn_str = jconn_str.asString();
+        std::string user = FromJson<std::string>(jcacher["user"], "");
+        std::string password = FromJson<std::string>(jcacher["password"], "");
+        uint num_workers = FromJson<uint>(jcacher["workers"], 2);
+        auto cb_cacher = std::make_shared<CouchbaseCacher>(conn_str, user, password, num_workers);
+        cb_cacher->WaitForInit();
+        cacher_ = std::move(cb_cacher);
     }
     if (!cacher_) {
         LOG(INFO) << "Starting without cacher";

@@ -18,7 +18,7 @@ class Semaphore;
 
 class CouchbaseCacher : public TileCacher {
 public:
-    CouchbaseCacher(const std::vector<std::string>& hosts, const std::string& user = "",
+    CouchbaseCacher(const std::string& conn_str, const std::string& user = "",
                     const std::string& password = "", uint num_workers = 2);
     ~CouchbaseCacher();
 
