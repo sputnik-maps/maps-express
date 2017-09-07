@@ -190,6 +190,7 @@ static ProgramOptions ParseProgramOptions(int argc, char* argv[]) {
 
 int main(int argc, char* argv[]) {
     std::signal(SIGHUP, signal_handler);
+    FLAGS_logtostderr = true;
     google::InitGoogleLogging(argv[0]);
     google::InstallFailureSignalHandler();
 
@@ -213,15 +214,19 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
+    std::shared_ptr<const Json::Value> japp_ptr = config->GetValue("app");
+    assert(japp_ptr);
+    const Json::Value& japp = *japp_ptr;
+    const Json::Value& jlog_dir = japp["log_dir"];
+    if (jlog_dir.isString()) {
+        FLAGS_log_dir = jlog_dir.asCString();
+        FLAGS_logtostderr = false;
+    };
+
     auto dscache = mapnik::datasource_cache::instance;
     if(!dscache().register_datasources(MAPNIK_PLUGINDIR)){
         LOG(FATAL) << "could not register postgis plugin";
     }
-
-    std::shared_ptr<const Json::Value> japp_ptr = config->GetValue("app");
-    assert(japp_ptr);
-    const Json::Value& japp = *japp_ptr;
-    FLAGS_log_dir = japp["log_dir"].asString().c_str();
 
     const std::string& bind_addr = p_options.bind_addr.empty() ? p_options.host : p_options.bind_addr;
 
