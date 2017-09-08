@@ -53,13 +53,20 @@ static std::shared_ptr<endpoints_map_t> ParseEndpoints(const Json::Value jendpoi
             auto params = std::make_shared<EndpointParams>();
             params->minzoom = FromJson<int>(jparams["minzoom"], 0);
             params->maxzoom = FromJson<int>(jparams["maxzoom"], 19);
-            params->zoom_offset = FromJson<int>(jparams["data_zoom_offset"], 0);
+            int zoom_offset = FromJson<int>(jparams["data_zoom_offset"], 0);
+            if (zoom_offset > 0) {
+                LOG(ERROR) << "\"data_zoom_offset must be negative o zero";
+                LOG(ERROR) << "Skipping endpoint \"" << endpoint_path << '"';
+                continue;
+            }
+            params->zoom_offset = static_cast<uint>(-zoom_offset);
             std::string provider_name = FromJson<std::string>(jparams["data_provider"], "");
             if (!provider_name.empty()) {
                 auto data_provider = data_manager.GetProvider(provider_name);
                 if (!data_provider) {
                     LOG(ERROR) << "Data provider \"" << provider_name << "\" for endpoint \""
                                << endpoint_path << "\" not found!";
+                    LOG(ERROR) << "Skipping endpoint \"" << endpoint_path << '"';
                     continue;
                 }
                 params->data_provider = std::move(data_provider);
@@ -71,6 +78,7 @@ static std::shared_ptr<endpoints_map_t> ParseEndpoints(const Json::Value jendpoi
                 params->type = EndpointType::static_files;
                 if (!params->data_provider) {
                     LOG(ERROR) << "No data provider for endpoint '" << endpoint_path << "' specified!";
+                    LOG(ERROR) << "Skipping endpoint \"" << endpoint_path << '"';
                     continue;
                 }
             } else if (type == "render") {
@@ -83,12 +91,14 @@ static std::shared_ptr<endpoints_map_t> ParseEndpoints(const Json::Value jendpoi
                 }
                 if (params->style_name.empty()) {
                     LOG(ERROR) << "No style name for endpoint '" << endpoint_path << "' provided!";
+                    LOG(ERROR) << "Skipping endpoint \"" << endpoint_path << '"';
                     continue;
                 }
             } else if (type == "mvt") {
                 params->type = EndpointType::mvt;
                 if (!params->data_provider) {
                     LOG(ERROR) << "No data provider for endpoint '" << endpoint_path << "' specified!";
+                    LOG(ERROR) << "Skipping endpoint \"" << endpoint_path << '"';
                     continue;
                 }
                 auto filter_map_path = FromJson<std::string>(jparams["filter_map"]);
@@ -197,7 +207,7 @@ proxygen::RequestHandler* HttpHandlerFactory::onRequest(proxygen::RequestHandler
         return new MonHandler(monitor_);
     }
     auto endpoints = std::atomic_load(&endpoints_);
-    return new TileHandler(internal_port_, *timer_->timer, std::make_shared<TileProcessor>(render_manager_),
+    return new TileHandler(internal_port_, *timer_->timer, render_manager_,
                            endpoints, cacher_, nodes_monitor_);
 }
 

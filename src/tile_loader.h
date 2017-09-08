@@ -6,15 +6,17 @@
 #include "async_task.h"
 #include "tile.h"
 
-enum class LoadError {
-    internal_error,
-    not_found
-};
 
-using LoadTask = AsyncTask<Tile&&, LoadError>;
 
 class TileLoader {
 public:
+    enum class LoadError {
+        internal_error,
+        not_found
+    };
+
+    using LoadTask = AsyncTask<Tile&&, LoadError>;
+
     virtual void Load(std::shared_ptr<LoadTask> task, const TileId& tile_id,
                       const std::string& version = "") = 0;
 

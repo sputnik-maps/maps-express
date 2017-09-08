@@ -22,7 +22,7 @@ using proxygen::HTTPConnector;
 using proxygen::HTTPUpstreamSession;
 
 struct RequestInfo {
-    http_task_ptr async_task;
+    HTTPClient::http_task_ptr async_task;
     HTTPMessage request;
     std::unique_ptr<folly::IOBuf> request_body;
     std::unique_ptr<proxygen::HTTPMessage> response;
@@ -172,13 +172,13 @@ inline bool HTTPWorker::MaybeResetHostPort(const std::string& host, uint16_t por
 bool HTTPWorker::Request(std::unique_ptr<RequestInfo> request_info) {
     if (request_info_) {
         LOG(ERROR) << "HTTPWorker already processing request";
-        request_info->async_task->NotifyError();
+        request_info->async_task->NotifyError(HTTPClient::Error::internal);
         return false;
     }
     proxygen::URL url(request_info->request.getURL());
     MaybeResetHostPort(url.getHost(), url.getPort());
     if (!hostname_resolved_ && !ResolveHostname()) {
-        request_info->async_task->NotifyError();
+        request_info->async_task->NotifyError(HTTPClient::Error::resolution);
         return false;
     }
     request_info_ = std::move(request_info);
@@ -207,7 +207,7 @@ void HTTPWorker::connectError(const folly::AsyncSocketException& ex) {
         return;
     }
     if (request_info_) {
-        request_info_->async_task->NotifyError();
+        request_info_->async_task->NotifyError(HTTPClient::Error::connection);
     }
     num_reconnects_ = 0;
     request_info_.reset();
@@ -243,8 +243,12 @@ void HTTPWorker::onEOM() noexcept {
 
 void HTTPWorker::onError(const proxygen::HTTPException& error) noexcept {
     if (request_info_) {
-        LOG(WARNING) << error.what();
-        request_info_->async_task->NotifyError();
+        if (error.getProxygenError() == proxygen::kErrorTimeout) {
+            request_info_->async_task->NotifyError(HTTPClient::Error::timeout);
+        } else {
+            LOG(WARNING) << error;
+            request_info_->async_task->NotifyError(HTTPClient::Error::network);
+        }
         request_info_.reset();
     }
     MaybeProcessNextRequest();
@@ -287,7 +291,7 @@ void HTTPClient::Shutdown() {
     evb_.runImmediatelyOrRunInEventBaseThreadAndWait([this]{
         workers_pool_.clear();
         for (auto& request_info : pending_requests_) {
-            request_info->async_task->NotifyError();
+            request_info->async_task->NotifyError(Error::shutdown);
         }
         stopped_ = true;
     });
@@ -297,7 +301,7 @@ void HTTPClient::Shutdown() {
 void HTTPClient::Request(http_task_ptr async_task, proxygen::HTTPMethod method, const std::string& url,
                          const proxygen::HTTPHeaders* headers, std::unique_ptr<folly::IOBuf> body) {
     if (stopped_) {
-        async_task->NotifyError();
+        async_task->NotifyError(Error::shutdown);
         return;
     }
     auto request_info = std::make_unique<RequestInfo>();
@@ -342,7 +346,7 @@ http_response_ptr HTTPClient::RequestAndWait(proxygen::HTTPMethod method, const 
     auto task = std::make_shared<HTTPTask>([&](http_response_ptr r) {
         response = std::move(r);
         baton.post();
-    }, [&]{
+    }, [&](HTTPClient::Error err) {
         baton.post();
     }, false);
     Request(std::move(task), method, url, headers, std::move(body));

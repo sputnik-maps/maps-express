@@ -31,11 +31,14 @@ void ProxyHandler::Connect() {
 
 void ProxyHandler::Detach() {
     assert(!detached_);
+    const std::string url = headers_->getURL();
+    LOG(INFO) << "Detaching proxy handler (" << url << ")";
     if (txn_) {
         txn_->sendAbort();
     }
     detached_ = true;
     MaybeTerminate();
+    LOG(INFO) << "Detached proxy handler (" << url << ")";
 }
 
 void ProxyHandler::connectSuccess(proxygen::HTTPUpstreamSession* session) {
@@ -96,6 +99,7 @@ void ProxyHandler::onEOM() noexcept {
 void ProxyHandler::onUpgrade(proxygen::UpgradeProtocol protocol) noexcept {}
 
 void ProxyHandler::onError(const proxygen::HTTPException& error) noexcept {
+    LOG(ERROR) << error;
     callbacks_.OnProxyError();
 }
 

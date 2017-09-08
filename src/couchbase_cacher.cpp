@@ -1,22 +1,24 @@
 #include "couchbase_cacher.h"
 
-#include <folly/fibers/Semaphore.h>
-
 
 CouchbaseCacher::CouchbaseCacher(const std::string& conn_str, const std::string& user,
                                  const std::string& password, uint num_workers) {
-    sem_ = std::make_unique<folly::fibers::Semaphore>(num_workers);
+    rsem_ = std::make_unique<RSemaphore>(num_workers);
     for (uint i = 0; i < num_workers; ++i) {
         auto worker = std::make_unique<CouchbaseWorker>(*this, conn_str, user, password);
-        workers_pool_.PushWorker(std::move(worker), [&](workers_pool_t::worker_t*) { sem_->signal(); }, {});
+        auto init_task = std::make_shared<workers_pool_t::WorkerInitTask>(
+                    [&](workers_pool_t::worker_t*) { rsem_->signal(); }, false);
+        workers_pool_.PushWorker(std::move(worker), std::move(init_task));
     }
 }
 
-CouchbaseCacher::~CouchbaseCacher() { }
+CouchbaseCacher::~CouchbaseCacher() {
+    workers_pool_.Stop();
+}
 
 
 void CouchbaseCacher::WaitForInit() {
-    sem_->wait();
+    rsem_->wait();
 }
 
 void CouchbaseCacher::GetImpl(const std::string& key) {

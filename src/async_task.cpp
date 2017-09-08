@@ -3,7 +3,9 @@
 #include "folly/io/async/EventBaseManager.h"
 
 folly::EventBase* GetEventBase() {
-    return folly::EventBaseManager::get()->getExistingEventBase();
+    folly::EventBase* evb = folly::EventBaseManager::get()->getExistingEventBase();
+    assert(evb);
+    return evb;
 }
 
 bool RunInEventBaseThread(folly::EventBase* evb, std::function<void()>&& func) {

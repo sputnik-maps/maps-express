@@ -24,14 +24,18 @@ static const std::vector<std::pair<std::string, std::string>> kRenderMapping = {
 };
 
 EtcdConfig::EtcdConfig(const std::string& etcd_host, const std::string& root_node) :
-        host_(etcd_host), root_node_name_(root_node)
+        host_(etcd_host),
+        root_node_name_(root_node)
 {
     client_ = std::make_unique<EtcdClient>(etcd_host);
+    evb_ = &client_->get_event_base();
     UpdateAll();
 }
 
 EtcdConfig::EtcdConfig(std::shared_ptr<EtcdClient> etcd_client, const std::string& root_node_) :
-        client_(std::move(etcd_client)), root_node_name_(root_node_)
+        client_(std::move(etcd_client)),
+        root_node_name_(root_node_),
+        evb_(&client_->get_event_base())
 {
     UpdateAll();
 }
@@ -66,24 +70,14 @@ void EtcdConfig::UpdateAll() {
             inited_ = true;
             baton_.post();
         }
-        StartWatch();
+        evb_->runInLoop([&]{ StartWatch(); });
     }, [&](EtcdError err) {
-        if (err == EtcdError::network_error || err == EtcdError::connection_timeout) {
-            folly::EventBase* evb = folly::EventBaseManager::get()->getEventBase();
-            assert(evb);
-            evb->runAfterDelay([&]{UpdateAll();}, 500);
-            return;
-        }
         if (err == EtcdError::not_found) {
             LOG(ERROR) << "Node \"" << root_node_name_ << "\" not found on etcd server!";
         } else {
             LOG(ERROR) << "Error while loading kv node " << root_node_name_;
         }
-        if (!inited_) {
-            valid_ = false;
-            inited_ = true;
-            baton_.post();
-        }
+        evb_->runAfterDelay([&]{ UpdateAll(); }, 500);
     }, false);
 
    client_->Get(std::move(task), root_node_name_, true);
@@ -92,15 +86,16 @@ void EtcdConfig::UpdateAll() {
 void EtcdConfig::StartWatch() {
     auto watch_task = std::make_shared<EtcdClient::WatchTask>([&](std::shared_ptr<EtcdUpdate> update) {
             ProcessUpdate(std::move(update));
-            StartWatch();
+            evb_->runInLoop([&]{ StartWatch(); });
         }, [&](EtcdError err) {
             if (err == EtcdError::pending_shutdown) {
                 return;
             }
             if (err == EtcdError::wait_id_outdated) {
                 UpdateAll();
+            } else {
+                evb_->runAfterDelay([&]{ StartWatch(); }, 500);
             }
-            StartWatch();
         }, false);
     client_->Watch(std::move(watch_task), root_node_name_, update_id_);
 }

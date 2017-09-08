@@ -9,6 +9,10 @@ class EtcdClient;
 class EtcdUpdate;
 class EtcdNode;
 
+namespace folly {
+class EventBase;
+} // ns folly
+
 class EtcdConfig : public Config {
 public:
     explicit EtcdConfig(const std::string& etcd_host, const std::string& root_node = "/");
@@ -30,6 +34,7 @@ private:
     std::string host_;
     std::string root_node_name_;
     mutable folly::Baton<> baton_;
+    folly::EventBase* evb_{nullptr};
     std::int64_t update_id_{0};
     std::atomic_bool inited_{false};
     bool valid_{false};

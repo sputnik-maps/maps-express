@@ -173,19 +173,6 @@ static std::pair<EtcdResponse, EtcdError> ProcessGet(http_response_ptr response)
     return std::make_pair(EtcdResponse{std::move(etcd_node), etcd_id}, EtcdError::none);
 }
 
-
-std::pair<EtcdResponse, EtcdError> EtcdClient::Get(const std::string& key, bool recursive) {
-    if (pending_shutdown_) {
-        return std::make_pair(EtcdResponse{}, EtcdError::pending_shutdown);
-    }
-    std::string url = MakeUrl(key);
-    if (recursive) {
-        url.append("?recursive=true");
-    }
-    http_response_ptr response = http_client_->RequestAndWait(proxygen::HTTPMethod::GET, url);
-    return ProcessGet(std::move(response));
-}
-
 void EtcdClient::Get(std::shared_ptr<GetTask> task, const std::string& key, bool recursive) {
     if (pending_shutdown_) {
         task->NotifyError(EtcdError::pending_shutdown);
@@ -195,14 +182,14 @@ void EtcdClient::Get(std::shared_ptr<GetTask> task, const std::string& key, bool
     if (recursive) {
         url.append("?recursive=true");
     }
-    auto http_task = std::make_shared<HTTPTask>([task](http_response_ptr response) {
+    auto http_task = std::make_shared<HTTPClient::HTTPTask>([task](http_response_ptr response) {
         auto result = ProcessGet(std::move(response));
         if (result.second != EtcdError::none) {
             task->NotifyError(result.second);
         } else {
             task->SetResult(std::move(result.first));
         }
-    }, [task]{
+    }, [task](HTTPClient::Error err) {
         task->NotifyError(EtcdError::network_error);
     }, false);
     http_client_->Request(std::move(http_task), proxygen::HTTPMethod::GET, url);
@@ -258,15 +245,6 @@ static std::pair<EtcdUpdate, EtcdError> ProcessWatch(http_response_ptr response)
     return std::make_pair(std::move(etcd_update), EtcdError::none);
 }
 
-std::pair<EtcdUpdate, EtcdError> EtcdClient::Watch(const std::string& key, std::int64_t modified_id) {
-    if (pending_shutdown_) {
-        return std::make_pair(EtcdUpdate{}, EtcdError::pending_shutdown);
-    }
-    std::string url = MakeWatchUrl(key, modified_id);
-    http_response_ptr response = http_client_->RequestAndWait(proxygen::HTTPMethod::GET, url);
-    return ProcessWatch(std::move(response));
-}
-
 void EtcdClient::Watch(std::shared_ptr<WatchTask> task, const std::string& key, std::int64_t modified_id) {
     if (pending_shutdown_) {
         task->NotifyError(EtcdError::pending_shutdown);
@@ -274,15 +252,19 @@ void EtcdClient::Watch(std::shared_ptr<WatchTask> task, const std::string& key, 
     }
     std::string url = MakeWatchUrl(key, modified_id);
 
-    auto http_task = std::make_shared<HTTPTask>([task](http_response_ptr response) {
+    auto http_task = std::make_shared<HTTPClient::HTTPTask>([task](http_response_ptr response) {
         auto result = ProcessWatch(std::move(response));
         if (result.second != EtcdError::none) {
             task->NotifyError(result.second);
         } else {
             task->SetResult(std::make_shared<EtcdUpdate>(std::move(result.first)));
         }
-    }, [task]{
-        task->NotifyError(EtcdError::network_error);
+    }, [this, task, key, modified_id](HTTPClient::Error err) {
+        if (err == HTTPClient::Error::timeout && !task->cancelled()) {
+            evb_.runInLoop(std::bind(&EtcdClient::Watch, this, std::move(task), std::move(key), modified_id));
+        } else {
+            task->NotifyError(EtcdError::network_error);
+        }
     }, false);
     http_client_->Request(std::move(http_task), proxygen::HTTPMethod::GET, url);
 }
@@ -305,14 +287,14 @@ void EtcdClient::Set(std::shared_ptr<UpdateTask> task, const std::string& key,
         body.append(std::to_string(ttl));
     }
     auto body_buf = folly::IOBuf::copyBuffer(body);
-    auto http_task = std::make_shared<HTTPTask>([task](http_response_ptr response) {
+    auto http_task = std::make_shared<HTTPClient::HTTPTask>([task](http_response_ptr response) {
         EtcdError err = CheckResponse(response);
         if (err == EtcdError::none) {
             task->SetResult();
         } else {
             task->NotifyError(err);
         }
-    }, [task]{
+    }, [task](HTTPClient::Error err) {
         task->NotifyError(EtcdError::network_error);
     }, false);
 
@@ -326,14 +308,14 @@ void EtcdClient::Delete(std::shared_ptr<UpdateTask> task, const std::string& key
         return;
     }
     std::string url = MakeUrl(key);
-    auto http_task = std::make_shared<HTTPTask>([task](http_response_ptr response) {
+    auto http_task = std::make_shared<HTTPClient::HTTPTask>([task](http_response_ptr response) {
         EtcdError err = CheckResponse(response);
         if (err == EtcdError::none) {
             task->SetResult();
         } else {
             task->NotifyError(err);
         }
-    }, [task]{
+    }, [task](HTTPClient::Error err) {
         task->NotifyError(EtcdError::network_error);
     }, false);
     http_client_->Request(std::move(http_task), proxygen::HTTPMethod::DELETE, url);

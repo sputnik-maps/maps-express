@@ -23,7 +23,7 @@ struct EndpointParams {
     uint maxzoom;
     uint metatile_height{1};
     uint metatile_width{1};
-    int zoom_offset{0};
+    uint zoom_offset{0};
     EndpointType type;
     bool allow_layers_query{false};
     bool allow_utf_grid{false};

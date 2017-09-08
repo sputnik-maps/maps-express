@@ -7,6 +7,7 @@
 
 #include "async_task.h"
 
+
 class HTTPWorker;
 class RequestInfo;
 
@@ -16,11 +17,21 @@ struct HTTPResponse {
 };
 
 using http_response_ptr = std::shared_ptr<HTTPResponse>;
-using HTTPTask = AsyncTask<http_response_ptr>;
-using http_task_ptr = std::shared_ptr<HTTPTask>;
 
 class HTTPClient {
 public:
+
+    enum class Error {
+        internal,
+        resolution,
+        connection,
+        timeout,
+        network,
+        shutdown
+    };
+
+    using HTTPTask = AsyncTask<http_response_ptr, Error>;
+    using http_task_ptr = std::shared_ptr<HTTPTask>;
 
     HTTPClient(folly::EventBase& evb, const std::string& host, uint16_t port = 80, uint8_t num_workers = 1);
     ~HTTPClient();

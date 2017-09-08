@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 2.8.8 FATAL_ERROR)
 
 cmake_policy(VERSION 2.8.8)
 project(maps-express)
-set(configuration "Release")
 
 set(CMAKE_C_OUTPUT_EXTENSION_REPLACE 1)
 set(CMAKE_CXX_OUTPUT_EXTENSION_REPLACE 1)
@@ -29,7 +28,7 @@ set_target_properties(maps-express PROPERTIES COMPILE_FLAGS "-std=c++14 -DMAPNIK
     -DHAVE_PNG -DHAVE_WEBP -DHAVE_TIFF -DLINUX -DMAPNIK_THREADSAFE -DBOOST_SPIRIT_NO_PREDEFINED_TERMINALS=1 \
     -DBOOST_PHOENIX_NO_PREDEFINED_TERMINALS=1 -DBOOST_SPIRIT_USE_PHOENIX_V3=1 -DHAVE_CAIRO -DGRID_RENDERER \
     -fvisibility=hidden -fvisibility-inlines-hidden -Wall -pthread -ftemplate-depth-300 -Wsign-compare -Wshadow \
-    -Werror -g")
+    -Werror")
 
 target_link_libraries(maps-express
       ${CMAKE_SOURCE_DIR}/mapnik-vector-tile/build/Release/obj.target/gyp/libmapnik_vector_tile_impl.a

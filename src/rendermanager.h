@@ -5,6 +5,7 @@
 
 #include "config.h"
 #include "renderworker.h"
+#include "rsemaphore.h"
 #include "thread_pool.h"
 
 class RenderManager;
@@ -19,13 +20,6 @@ private:
 };
 
 using render_result_t = Metatile&&;
-
-
-namespace folly {
-namespace fibers {
-class Semaphore;
-} // ns fibers
-} // ns folly
 
 class RenderManager {
 public:
@@ -71,7 +65,7 @@ private:
     std::vector<StyleInfo> pending_update_;
     std::vector<const RenderWorker*> workers_to_update_;
     std::vector<const RenderWorker*> updated_workers_;
-    std::unique_ptr<folly::fibers::Semaphore> sem_;
+    std::unique_ptr<RSemaphore> rsem_;
     std::atomic_bool updating_{false};
     std::atomic_bool inited_{false};
 

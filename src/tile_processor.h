@@ -38,8 +38,6 @@ public:
 
     void CancelProcessing();
 
-    uint GetStyleVersion(const std::string& style_name);
-
 private:
     void LoadTile();
     void OnLoadSuccess(Tile&& tile);
@@ -47,6 +45,7 @@ private:
     void ProcessMvt();
     void OnRenderSuccess(Metatile&& result);
     void OnRenderError();
+    void Finish();
 
     RenderManager& render_manager_;
 

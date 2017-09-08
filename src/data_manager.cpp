@@ -97,8 +97,11 @@ void DataManager::AddDataProvider(const std::string& provider_name, const Json::
     std::shared_ptr<TileLoader> loader = loader_itr->second;
     std::shared_ptr<DataProvider::zoom_groups_t> zoom_groups = parse_zoom_groups(jprovider_params);
     uint max_zoom = jprovider_params.get("max zoom", 19).asUInt();
-    uint min_zoom = zoom_groups == nullptr ? jprovider_params.get("min zoom", 0).asUInt() : *zoom_groups->rbegin();
-
+    uint min_zoom = zoom_groups == nullptr ? jprovider_params.get("min zoom", 0).asUInt() : *zoom_groups->begin();
+    if (max_zoom < min_zoom) {
+        LOG(ERROR) << "Invalid max zoom: " << max_zoom;
+        return;
+    }
     auto provider = std::make_shared<DataProvider>(std::move(loader), min_zoom, max_zoom, std::move(zoom_groups));
     providers_map_.emplace(provider_name, std::move(provider));
 }

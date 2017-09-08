@@ -1,4 +1,6 @@
-#include "tile_processor.h"
+﻿#include "tile_processor.h"
+
+#include <glog/logging.h>
 
 #include "rendermanager.h"
 #include "data_manager.h"
@@ -11,6 +13,10 @@ TileProcessor::~TileProcessor() {
 }
 
 void TileProcessor::GetMetatile(std::shared_ptr<TileRequest> request, std::shared_ptr<TileTask> task) {
+#ifndef NDEBUG
+    LOG(INFO) << "Starting processing of metatile: " << request->metatile_id
+              << " style:" << request->endpoint_params->style_name;
+#endif
     assert(request);
     tile_request_ = std::move(request);
     assert(task);
@@ -25,11 +31,8 @@ void TileProcessor::GetMetatile(std::shared_ptr<TileRequest> request, std::share
         ProcessMvt();
     } else {
         tile_task_->NotifyError(Error::internal);
+        Finish();
     }
-}
-
-uint TileProcessor::GetStyleVersion(const std::string& style_name) {
-    return render_manager_.GetStyleVersion(style_name);
 }
 
 void TileProcessor::CancelProcessing() {
@@ -43,27 +46,32 @@ void TileProcessor::LoadTile() {
     auto& data_provider = endpoint_params.data_provider;
     if (!(data_provider && data_provider->HasVersion(tile_request_->data_version))) {
         tile_task_->NotifyError(Error::not_found);
+        Finish();
         return;
     }
-    TileId data_tile_id = tile_request_->tile_id;
-    int zoom_offset = endpoint_params.zoom_offset;
-    if (zoom_offset < 0) {
-        data_tile_id = GetUpperZoom(data_tile_id, -zoom_offset);
-    }
-    pending_work_ = data_provider->GetTile(
+    auto load_tile_task = std::make_shared<TileLoader::LoadTask>(
                 std::bind(&TileProcessor::OnLoadSuccess, this, std::placeholders::_1),
-                [this](LoadError err) {
-                    if (err == LoadError::not_found) {
+                [this](TileLoader::LoadError err) {
+#ifndef NDEBUG
+                    LOG(ERROR) << "Error while getting data for metatile: " << tile_request_->metatile_id
+                               << " style:" << tile_request_->endpoint_params->style_name;
+#endif
+                    if (err == TileLoader::LoadError::not_found) {
                         tile_task_->NotifyError(Error::not_found);
                     } else {
                         tile_task_->NotifyError(Error::internal);
                     }
-                    pending_work_.reset();
-                },
-                data_tile_id,  tile_request_->data_version);
+                    Finish();
+                }, false);
+    pending_work_ = load_tile_task;
+    data_provider->GetTile(std::move(load_tile_task), tile_request_->tile_id, endpoint_params.zoom_offset,
+                           tile_request_->data_version);
 }
 
 void TileProcessor::OnLoadSuccess(Tile&& tile) {
+#ifndef NDEBUG
+    LOG(INFO) << "Successfully loaded tile: " << tile.id;
+#endif
     pending_work_.reset();
     const EndpointParams& endpoint_params = *tile_request_->endpoint_params;
     if (endpoint_params.type == EndpointType::static_files) {
@@ -106,11 +114,24 @@ void TileProcessor::ProcessMvt() {
 }
 
 void TileProcessor::OnRenderSuccess(Metatile&& result) {
+#ifndef NDEBUG
+    LOG(INFO) << "Successfully processed metatile: " << tile_request_->metatile_id
+              << " style:" << tile_request_->endpoint_params->style_name;
+#endif
     tile_task_->SetResult(std::move(result));
-    pending_work_.reset();
+    Finish();
 }
 
 void TileProcessor::OnRenderError() {
+#ifndef NDEBUG
+    LOG(ERROR) << "Error while processing metatile: " << tile_request_->metatile_id
+              << " style:" << tile_request_->endpoint_params->style_name;
+#endif
     tile_task_->NotifyError(Error::rendering);
+    Finish();
+}
+
+inline void TileProcessor::Finish() {
     pending_work_.reset();
+    delete this;
 }

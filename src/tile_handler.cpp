@@ -11,7 +11,11 @@
 #include <vector_tile_compression.hpp>
 
 #include "data_provider.h"
+#include "nodes_monitor.h"
+#include "rendermanager.h"
 #include "session_wrapper.h"
+#include "tile_cacher.h"
+#include "tile_processor.h"
 #include "util.h"
 
 
@@ -120,32 +124,31 @@ static optional<folly::SocketAddress> GetRenderNodeAddr(const NodesMonitor& moni
         return nullopt;
     }
     const TileId lt_tile_id = metatile_id.left_top();
-    int i = (lt_tile_id.x ^ lt_tile_id.y) % nodes_vec->size();
-    const NodesMonitor::addr_entry_t& addr_entry = (*nodes_vec)[i];
-    if (addr_entry.second) {
+    int i = (lt_tile_id.x ^ lt_tile_id.y ^ lt_tile_id.z) % nodes_vec->size();
+    const NodesMonitor::AddrEntry& addr_entry = (*nodes_vec)[i];
+    if (addr_entry.self) {
         // Current node
         return nullopt;
     }
-    return addr_entry.first;
+    return addr_entry.sock_addr;
 }
 
 TileHandler::TileHandler(const std::string& internal_port,
                          folly::HHWheelTimer& timer,
-                         std::shared_ptr<TileProcessor> tile_processor,
+                         RenderManager& render_manager,
                          std::shared_ptr<const endpoints_map_t> endpoints,
                          std::shared_ptr<TileCacher> cacher,
                          NodesMonitor* nodes_monitor) :
-        tile_processor_(std::move(tile_processor)),
         endpoints_(std::move(endpoints)),
         cacher_(std::move(cacher)),
         timer_(timer),
+        render_manager_(render_manager),
         connection_timeout_cb_(*this),
         nodes_monitor_(nodes_monitor),
-        internal_port_(internal_port) {
-    assert(tile_processor_);
-}
+        internal_port_(internal_port) {}
 
 TileHandler::~TileHandler() {
+    connection_timeout_cb_.cancelTimeout();
     if (pending_work_) {
         pending_work_->cancel();
     }
@@ -289,7 +292,7 @@ void TileHandler::onRequest(std::unique_ptr<HTTPMessage> headers) noexcept {
         auto metatile_id = endpoint_params.data_provider->GetOptimalMetatileId(
                     tile_id, endpoint_params.zoom_offset);
         if (!metatile_id) {
-            LOG(ERROR) << "Error while computing optimal metatile id!";
+            LOG(ERROR) << "Error while computing optimal metatile id for tile " << tile_id << "!";
             SendError(500);
             return;
         }
@@ -302,7 +305,7 @@ void TileHandler::onRequest(std::unique_ptr<HTTPMessage> headers) noexcept {
     if (cacher_) {
         uint style_version = 0;
         if (!endpoint_params.style_name.empty()) {
-            style_version = tile_processor_->GetStyleVersion(endpoint_params.style_name);
+            style_version = render_manager_.GetStyleVersion(endpoint_params.style_name);
         }
         request_info_str_ = MakeRequestInfoStr(*tile_request_, ext_str, style_version);
         is_internal_request_ = IsInternalRequest(*headers_, internal_port_);
@@ -362,7 +365,9 @@ void TileHandler::GenerateTile() noexcept {
     }, true);
 
     pending_work_ = tile_task;
-    tile_processor_->GetMetatile(tile_request_, std::move(tile_task));
+    // TileProcessor is self destructable
+    TileProcessor* tile_processor = new TileProcessor(render_manager_);
+    tile_processor->GetMetatile(tile_request_, std::move(tile_task));
 }
 
 void TileHandler::LoadFromCacheOrError() {
@@ -416,18 +421,13 @@ void TileHandler::LockCacheAndGenerateTile() {
     pending_work_ = response_task;
 
     auto start_time = std::chrono::system_clock::now();
-
-    // Capture tile_processor_ to keep it alive,
-    // in case when TileHandler was destroyed due to timeout
     auto tile_task = std::make_shared<TileProcessor::TileTask>(
             [response_task, cacher_lock, cacher = cacher_, request_info_str = request_info_str_,
-             endpoint_type = tile_request_->endpoint_params->type,
-             tile_id = tile_request_->tile_id, tile_processor = tile_processor_, start_time]
+             endpoint_type = tile_request_->endpoint_params->type, tile_id = tile_request_->tile_id, start_time]
                 (Metatile&& metatile) {
         auto stop_time = std::chrono::system_clock::now();
-        std::cout << "Processing of " << metatile.id << " took "
-                  << std::chrono::duration_cast<std::chrono::milliseconds>(stop_time - start_time).count() << std::endl;
-        cacher_lock->Cancel();
+        LOG(INFO) << "Processing of " << metatile.id << " took "
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(stop_time - start_time).count();
         bool response_sent = false;
         for (Tile& tile : metatile.tiles) {
             std::string tile_data;
@@ -453,17 +453,23 @@ void TileHandler::LockCacheAndGenerateTile() {
         }
         if (!response_sent) {
             response_task->NotifyError(TileProcessor::Error::internal);
+            cacher_lock->Unlock();
+        } else {
+            cacher_lock->Cancel();
         }
     }, [response_task, cacher_lock](TileProcessor::Error err) {
         response_task->NotifyError(err);
         cacher_lock->Unlock();
     }, false);
 
-    tile_processor_->GetMetatile(tile_request_, std::move(tile_task));
+    // TileProcessor is self destructable
+    TileProcessor* tile_processor = new TileProcessor(render_manager_);
+    tile_processor->GetMetatile(tile_request_, std::move(tile_task));
 }
 
 void TileHandler::ProxyToOtherNode(const folly::SocketAddress& addr) noexcept {
     assert(headers_);
+    LOG(INFO) << "Proxying request for " << tile_request_->tile_id << " to " << addr;
     proxy_handler_ = new ProxyHandler(*this, timer_, addr, std::move(headers_), *downstream_);
 }
 

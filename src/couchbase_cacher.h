@@ -6,6 +6,7 @@
 
 #include "config.h"
 #include "couchbase_worker.h"
+#include "rsemaphore.h"
 #include "thread_pool.h"
 #include "tile_cacher.h"
 
@@ -32,7 +33,7 @@ private:
 
     using workers_pool_t = ThreadPool<CouchbaseWorker, CBWorkTask>;
     workers_pool_t workers_pool_;
-    std::unique_ptr<folly::fibers::Semaphore> sem_;
+    std::unique_ptr<RSemaphore> rsem_;
 };
 
 

@@ -63,11 +63,9 @@ public:
 
     using GetTask = AsyncTask<EtcdResponse, EtcdError>;
     void Get(std::shared_ptr<GetTask> task, const std::string& key, bool recursive = false);
-    std::pair<EtcdResponse, EtcdError> Get(const std::string& key, bool recursive = false);
 
     using WatchTask = AsyncTask<std::shared_ptr<EtcdUpdate>, EtcdError>;
     void Watch(std::shared_ptr<WatchTask> task, const std::string& key, std::int64_t modified_id = 0);
-    std::pair<EtcdUpdate, EtcdError> Watch(const std::string& key, std::int64_t modified_id = 0);
 
     using UpdateTask = AsyncTask<void, EtcdError>;
     void Set(std::shared_ptr<UpdateTask> task, const std::string& key, const std::string& value,

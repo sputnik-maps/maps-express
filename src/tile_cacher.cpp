@@ -45,6 +45,7 @@ void TileCacher::Set(const std::string& key, std::shared_ptr<const CachedTile> c
                           std::chrono::seconds expire_time, std::shared_ptr<SetTask> task) {
     // TODO: notify CacherSetTask
     assert(!key.empty());
+    assert(cached_tile);
     waiters_vec_t waiters_vec;
     {
         std::lock_guard<std::mutex> lock(mux_);
@@ -72,18 +73,18 @@ std::unique_ptr<CacherLock> TileCacher::LockUntilSet(std::vector<std::string> ke
     locked_keys.reserve(keys.size());
     {
         std::lock_guard<std::mutex> lock(mux_);
-        for (const std::string& key : keys) {
+        for (std::string& key : keys) {
             if (set_waiters_.find(key) == set_waiters_.end()) {
                 set_waiters_[key] = {};
                 locked = true;
-                locked_keys.push_back(key);
+                locked_keys.push_back(std::move(key));
             }
         }
     }
     if (!locked) {
         return nullptr;
     }
-    return std::make_unique<CacherLock>(*this, std::move(keys));
+    return std::make_unique<CacherLock>(*this, std::move(locked_keys));
 }
 
 void TileCacher::Unlock(const std::vector<std::string>& keys) {
@@ -112,7 +113,9 @@ void TileCacher::OnTileRetrieved(const std::string& key, std::shared_ptr<CachedT
         if (waiters_itr == get_waiters_.end()) {
             return;
         }
-        tmp_cache_.Set(key, cached_tile);
+        if (cached_tile) {
+            tmp_cache_.Set(key, cached_tile);
+        }
         waiters = std::move(waiters_itr->second);
         get_waiters_.erase(waiters_itr);
     }

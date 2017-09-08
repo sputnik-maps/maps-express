@@ -42,17 +42,29 @@ static void GetCallback(lcb_t instance, int cbtype, const lcb_RESPBASE* resp) {
     if (resp->rc != LCB_SUCCESS) {
         if (resp->rc == LCB_KEY_ENOENT) {
             // Tile not found
+#ifndef NDEBUG
+            LOG(INFO) << "\"" << key << "\" not found in cache.";
+#endif
             cacher->OnTileRetrieved(key, nullptr);
             return;
         }
+#ifndef NDEBUG
+        LOG(ERROR) << "Error getting \"" << key << "\" from couchbase!";
+#endif
         LOG(ERROR) << lcb_strerror(instance, resp->rc);
         cacher->OnRetrieveError(key);
         return;
     }
+#ifndef NDEBUG
+    LOG(INFO) << "Successfully got \"" << key << "\" from couchbase.";
+#endif
     assert(cbtype == LCB_CALLBACK_GET);
     const lcb_RESPGET* rg = reinterpret_cast<const lcb_RESPGET*>(resp);
     if (rg->nvalue == 0) {
         // Tile not found
+#ifndef NDEBUG
+        LOG(INFO) << "\"" << key << "\" not found in cache.";
+#endif
         cacher->OnTileRetrieved(key, nullptr);
         return;
     }
@@ -99,10 +111,16 @@ static void SetCallback(lcb_t instance, int cbtype, const lcb_RESPBASE* resp) {
     CouchbaseCacher* cacher = static_cast<CouchbaseCacher*>(resp->cookie);
     std::string key(static_cast<const char*>(resp->key), resp->nkey);
     if (resp->rc != LCB_SUCCESS) {
+#ifndef NDEBUG
+        LOG(ERROR) << "Error setting \"" << key << "\" to couchbase!";
+#endif
         LOG(ERROR) << lcb_strerror(instance, resp->rc);
         cacher->OnSetError(key);
         return;
     }
+#ifndef NDEBUG
+    LOG(INFO) << "Successfully set \"" << key << "\" to couchbase.";
+#endif
     assert(cbtype == LCB_CALLBACK_STORE);
     cacher->OnTileSet(key);
 }
@@ -165,6 +183,9 @@ void CouchbaseWorker::ProcessTask(CBWorkTask task) noexcept {
 }
 
 void CouchbaseWorker::ProcessGet(const std::string& key) noexcept {
+#ifndef NDEBUG
+    LOG(INFO) << "Requesting \"" << key << "\" from couchbase.";
+#endif
     lcb_CMDGET gcmd = { 0 };
     LCB_CMD_SET_KEY(&gcmd, key.data(), key.size());
     lcb_get3(cb_instance_, &cacher_, &gcmd);
@@ -173,6 +194,9 @@ void CouchbaseWorker::ProcessGet(const std::string& key) noexcept {
 
 void CouchbaseWorker::ProcessSet(const std::string& key, const CachedTile& tile,
                                  std::chrono::seconds expire_time) noexcept {
+#ifndef NDEBUG
+    LOG(INFO) << "Seeting \"" << key << "\" to couchbase.";
+#endif
     std::string buf;
     protozero::pbf_writer writer(buf);
     writer.add_string(kDataTag, tile.data);

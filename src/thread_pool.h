@@ -35,13 +35,7 @@ public:
     ThreadPool& operator=(ThreadPool&&) = delete;
 
     ~ThreadPool() {
-        for (auto& wh : workers_) {
-            wh.stop();
-        }
-        wake_all();
-        for (auto& wh : workers_) {
-            wh.join();
-        }
+        Stop();
     }
 
 private:
@@ -123,6 +117,19 @@ private:
     };
 
 public:
+    void Stop() {
+        if (stopped_) {
+            return;
+        }
+        for (auto& wh : workers_) {
+            wh.stop();
+        }
+        wake_all();
+        for (auto& wh : workers_) {
+            wh.join();
+        }
+        stopped_ = true;
+    }
 
     inline uint NumWorkers() const {
         std::lock_guard<std::mutex> lock(workers_mutex_);
@@ -171,13 +178,10 @@ public:
         workers_.emplace_back(std::move(worker), nullptr, tasks_, queue_mutex_, cv_);
     }
 
-    std::shared_ptr<WorkerInitTask> PushWorker(std::unique_ptr<Wrk> worker, success_init_cb_t success_init_cb,
-                                               fail_init_cb_t fail_init_cb) {
+    void PushWorker(std::unique_ptr<Wrk> worker, std::shared_ptr<WorkerInitTask> init_task = nullptr) {
         assert(worker);
-        auto task = std::make_shared<WorkerInitTask>(std::move(success_init_cb), std::move(fail_init_cb), true);
         std::lock_guard<std::mutex> lock(workers_mutex_);
-        workers_.emplace_back(std::move(worker), task, tasks_, queue_mutex_, cv_);
-        return task;
+        workers_.emplace_back(std::move(worker), std::move(init_task), tasks_, queue_mutex_, cv_);
     }
 
     void RemoveWorkers(uint num_workers) {
@@ -253,4 +257,5 @@ private:
     mutable std::mutex queue_mutex_;
     mutable std::condition_variable cv_;
     std::size_t queue_limit_;
+    bool stopped_{false};
 };

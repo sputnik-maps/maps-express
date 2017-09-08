@@ -7,6 +7,9 @@
 
 #include "util.h"
 
+
+using LoadError = TileLoader::LoadError;
+
 CassandraLoader::CassandraLoader(const std::string& contact_points,
                                  const std::string& table,
                                  std::vector<std::string> versions,
@@ -54,7 +57,7 @@ CassandraLoader::~CassandraLoader() {
 }
 
 struct TaskWrapper {
-    std::shared_ptr<LoadTask> task;
+    std::shared_ptr<TileLoader::LoadTask> task;
     TileId tile_id;
 };
 
@@ -82,6 +85,9 @@ static void ResultCallback(CassFuture* future, void* data) {
         cass_result_free(result);
         cass_iterator_free(rows);
     } else {
+#ifndef NDEBUG
+        LOG(INFO) << "Error retrieving tile " << task_wrapper->tile_id << " from cassandra!";
+#endif
         const char* message;
         size_t message_length;
         cass_future_error_message(future, &message, &message_length);
@@ -89,6 +95,9 @@ static void ResultCallback(CassFuture* future, void* data) {
         task_wrapper->task->NotifyError(LoadError::internal_error);
 
     }
+#ifndef NDEBUG
+    LOG(INFO) << "Successfully retrieved tile " << task_wrapper->tile_id << " from cassandra.";
+#endif
     cass_future_free(future);
     delete task_wrapper;
 }
@@ -105,11 +114,15 @@ void CassandraLoader::Load(std::shared_ptr<LoadTask> task, const TileId& tile_id
     }
     int idx = xy_to_index(tile_id.x, tile_id.y);
     int block = idx / 32768;
-    std::stringstream cql_statment;
-    cql_statment << "SELECT tile FROM " << version << "." << table_
+    std::ostringstream cql_statment_stream;
+    cql_statment_stream << "SELECT tile FROM " << version << "." << table_
             << " WHERE idx=" << idx << " AND zoom=" << tile_id.z << " AND  block=" << block << ";";
+    std::string cql_statment = cql_statment_stream.str();
+#ifndef NDEBUG
+    LOG(INFO) << "Executing cql statement \"" << cql_statment << "\" for retriving tile " << tile_id;
+#endif
     CassStatement* statement
-      = cass_statement_new(cql_statment.str().c_str(), 0);
+      = cass_statement_new(cql_statment.c_str(), 0);
     cass_statement_set_consistency(statement, CASS_CONSISTENCY_ONE);
 
     CassFuture* result_future = cass_session_execute(session_, statement);

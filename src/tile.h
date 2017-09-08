@@ -17,7 +17,7 @@ struct TileId {
     TileId(uint _x, uint _y, uint _z) : x(_x), y(_y), z(_z) {}
 
     inline bool Valid() const noexcept {
-        uint max_coord = static_cast<uint>(std::pow(2, z));
+        uint max_coord = std::pow(2u, z);
         return x < max_coord && y < max_coord;
     }
 

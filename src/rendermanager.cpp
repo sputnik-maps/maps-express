@@ -2,8 +2,6 @@
 
 #include <fstream>
 
-#include <folly/fibers/Semaphore.h>
-
 #include <glog/logging.h>
 
 #include "subtiler.h"
@@ -28,10 +26,12 @@ static bool ParseStyleInfo(const std::string& name, const Json::Value& jstyle_in
     style_info.path = jmap_path.asString();
 
     const Json::Value& jutfgrid_allowed = jstyle_info["allow_utfgrid"];
-    if (!jutfgrid_allowed.isBool()) {
-        style_info.allow_grid_render = jstyle_info["allow_utfgrid"].asBool();
-    } else {
-        LOG(WARNING) << "allow_utfgrid should have bool type!";
+    if (!jutfgrid_allowed.isNull()) {
+        if (jutfgrid_allowed.isBool()) {
+            style_info.allow_grid_render = jutfgrid_allowed.asBool();
+        } else {
+            LOG(WARNING) << "allow_utfgrid should have bool type!";
+        }
     }
     const Json::Value& jversion = jstyle_info["version"];
     if (jversion.isUInt()) {
@@ -75,7 +75,8 @@ RenderManager::RenderManager(Config& config) :
     render_pool_.SetQueueLimit(queue_limit);
 
     std::shared_ptr<std::vector<StyleInfo>> styles;
-    std::shared_ptr<const Json::Value> jstyles = config.GetValue("render/styles", &update_observer_);
+    std::shared_ptr<const Json::Value> jstyles = config.GetValue("render/styles");
+//    std::shared_ptr<const Json::Value> jstyles = config.GetValue("render/styles", &update_observer_);
     if (jstyles->isObject()) {
         styles = std::make_shared<std::vector<StyleInfo>>();
         auto num_styles = jstyles->size();
@@ -106,19 +107,22 @@ RenderManager::RenderManager(Config& config) :
     assert(jworkers_ptr);
     const Json::Value& jworkers = *jworkers_ptr;
     uint num_workers = jworkers.isIntegral() ? jworkers.asUInt() : std::thread::hardware_concurrency();
-    sem_ = std::make_unique<folly::fibers::Semaphore>(num_workers);
+    rsem_ = std::make_unique<RSemaphore>(num_workers);
     for (uint i = 0; i < num_workers; ++i) {
         auto render_worker = std::make_unique<RenderWorker>(styles);
-        render_pool_.PushWorker(std::move(render_worker),
-                                [&](render_pool_t::worker_t*) { sem_->signal(); }, {});
+        auto init_task = std::make_shared<render_pool_t::WorkerInitTask>(
+                    [&](render_pool_t::worker_t*) { rsem_->signal(); }, false);
+        render_pool_.PushWorker(std::move(render_worker), std::move(init_task));
     }
 
     // Check if we already have style updates
     inited_ = true;
-    TryProcessStyleUpdate();
+//    TryProcessStyleUpdate();
 }
 
-RenderManager::~RenderManager() {}
+RenderManager::~RenderManager() {
+    render_pool_.Stop();
+}
 
 
 std::shared_ptr<RenderTask> RenderManager::Render(std::unique_ptr<RenderRequest> request,
@@ -127,6 +131,7 @@ std::shared_ptr<RenderTask> RenderManager::Render(std::unique_ptr<RenderRequest>
     assert(request);
     auto task = std::make_shared<RenderTask>(std::move(success_callback), std::move(error_callback), false);
     if (!has_style(request->style_name)) {
+        LOG(ERROR) << "Style \"" << request->style_name << "\" not found!";
         task->NotifyError();
         return task;
     }
@@ -233,5 +238,5 @@ void RenderManager::FinishUpdate() {
 }
 
 void RenderManager::WaitForInit() {
-    sem_->wait();
+    rsem_->wait();
 }
