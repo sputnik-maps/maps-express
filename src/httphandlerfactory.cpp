@@ -1,9 +1,17 @@
 #include "httphandlerfactory.h"
 
+#include <proxygen/httpserver/RequestHandler.h>
+#include <proxygen/lib/http/HTTPMessage.h>
+
+#include "config.h"
 #include "couchbase_cacher.h"
 #include "json_util.h"
 #include "mon_handler.h"
+#include "nodes_monitor.h"
+#include "status_monitor.h"
+#include "tile_cacher.h"
 #include "tile_handler.h"
+#include "tile_processing_manager.h"
 #include "util.h"
 
 
@@ -157,6 +165,11 @@ HttpHandlerFactory::HttpHandlerFactory(Config& config, std::shared_ptr<StatusMon
     }
     std::atomic_store(&endpoints_, endpoints_ptr);
 
+    uint max_processing_tasks = FromJson<uint>(jserver["max_tasks"], 200);
+    uint unlock_threshold = FromJson<uint>(jserver["unlock_threshold"], 180);
+    processing_manager_ = std::make_unique<TileProcessingManager>(render_manager_, max_processing_tasks,
+                                                                  unlock_threshold);
+
     auto jcacher_ptr = config.GetValue("cacher");
     if (jcacher_ptr) {
         const Json::Value& jcacher = *jcacher_ptr;
@@ -207,7 +220,7 @@ proxygen::RequestHandler* HttpHandlerFactory::onRequest(proxygen::RequestHandler
         return new MonHandler(monitor_);
     }
     auto endpoints = std::atomic_load(&endpoints_);
-    return new TileHandler(internal_port_, *timer_->timer, render_manager_,
+    return new TileHandler(internal_port_, *timer_->timer, *processing_manager_,
                            endpoints, cacher_, nodes_monitor_);
 }
 

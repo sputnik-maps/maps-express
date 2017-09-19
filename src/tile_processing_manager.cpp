@@ -1,4 +1,4 @@
-﻿#include "tile_processor.h"
+﻿#include "tile_processing_manager.h"
 
 #include <glog/logging.h>
 
@@ -6,7 +6,45 @@
 #include "data_manager.h"
 
 
-TileProcessor::TileProcessor(RenderManager& render_manager) : render_manager_(render_manager) {}
+class TileProcessor {
+public:
+    using Error = TileProcessingManager::Error;
+    using TileTask = TileProcessingManager::TileTask;
+    using hook_t = TileProcessingManager::processors_store_t::iterator;
+
+    TileProcessor(RenderManager& render_manager, TileProcessingManager& processing_manager, const hook_t& hook);
+    ~TileProcessor();
+
+    void GetMetatile(std::shared_ptr<TileRequest> request, std::shared_ptr<TileTask> task);
+
+    void CancelProcessing();
+
+private:
+    void LoadTile();
+    void OnLoadSuccess(Tile&& tile);
+    void ProcessRender();
+    void ProcessMvt();
+    void OnRenderSuccess(Metatile&& result);
+    void OnRenderError();
+    void Finish();
+
+    RenderManager& render_manager_;
+    TileProcessingManager& processing_manager_;
+    hook_t hook_;
+
+    std::shared_ptr<TileTask> tile_task_;
+    std::shared_ptr<TileRequest> tile_request_;
+    std::shared_ptr<Tile> data_tile_;
+    std::shared_ptr<AsyncTaskBase> pending_work_;
+
+    friend class TileProcessingManager;
+};
+
+TileProcessor::TileProcessor(RenderManager& render_manager, TileProcessingManager& processing_manager,
+                             const hook_t& hook) :
+    render_manager_(render_manager),
+    processing_manager_(processing_manager),
+    hook_(hook) {}
 
 TileProcessor::~TileProcessor() {
     CancelProcessing();
@@ -133,5 +171,62 @@ void TileProcessor::OnRenderError() {
 
 inline void TileProcessor::Finish() {
     pending_work_.reset();
-    delete this;
+    processing_manager_.NotifyDone(*this);
 }
+
+
+TileProcessingManager::TileProcessingManager(RenderManager& render_manager, uint max_processors,
+                                             uint unlock_threshold) :
+    render_manager_(render_manager),
+    max_processors_(max_processors),
+    unlock_threshold_(unlock_threshold) {}
+
+TileProcessingManager::~TileProcessingManager() {
+
+}
+
+bool TileProcessingManager::GetMetatile(std::shared_ptr<TileRequest> request,
+                                        std::shared_ptr<TileTask> task) {
+    processors_store_t::iterator itr;
+    bool locked = false;
+    {
+        std::lock_guard<std::mutex> lock(mux_);
+        if (locked_) {
+            return false;
+        }
+        processors_.emplace_front();
+        itr = processors_.begin();
+        ++num_processors_;
+        if (num_processors_ >= max_processors_) {
+            locked_ = true;
+            locked = true;
+        }
+    }
+    auto tile_processor = std::make_unique<TileProcessor>(render_manager_, *this, itr);
+    *itr = std::move(tile_processor);
+    (*itr)->GetMetatile(std::move(request), std::move(task));
+    if (locked) {
+        LOG(WARNING) << "Tile processing tasks limit (" << max_processors_ << ") exceeded!";
+    }
+    return true;
+}
+
+void TileProcessingManager::NotifyDone(TileProcessor& processor) {
+    std::unique_ptr<TileProcessor> processor_ptr;
+    bool unlocked = false;
+    {
+        std::lock_guard<std::mutex> lock(mux_);
+        processor_ptr = std::move(*processor.hook_);
+        processors_.erase(processor.hook_);
+        --num_processors_;
+        if (locked_ && num_processors_ <= unlock_threshold_) {
+            locked_ = false;
+            unlocked = true;
+        }
+    }
+    if (unlocked) {
+        LOG(INFO) << "Tile processing unlocked!";
+    }
+}
+
+

@@ -15,7 +15,7 @@
 #include "rendermanager.h"
 #include "session_wrapper.h"
 #include "tile_cacher.h"
-#include "tile_processor.h"
+#include "tile_processing_manager.h"
 #include "util.h"
 
 
@@ -135,14 +135,14 @@ static optional<folly::SocketAddress> GetRenderNodeAddr(const NodesMonitor& moni
 
 TileHandler::TileHandler(const std::string& internal_port,
                          folly::HHWheelTimer& timer,
-                         RenderManager& render_manager,
+                         TileProcessingManager& processing_manager,
                          std::shared_ptr<const endpoints_map_t> endpoints,
                          std::shared_ptr<TileCacher> cacher,
                          NodesMonitor* nodes_monitor) :
         endpoints_(std::move(endpoints)),
         cacher_(std::move(cacher)),
         timer_(timer),
-        render_manager_(render_manager),
+        processing_manager_(processing_manager),
         connection_timeout_cb_(*this),
         nodes_monitor_(nodes_monitor),
         internal_port_(internal_port) {}
@@ -305,7 +305,7 @@ void TileHandler::onRequest(std::unique_ptr<HTTPMessage> headers) noexcept {
     if (cacher_) {
         uint style_version = 0;
         if (!endpoint_params.style_name.empty()) {
-            style_version = render_manager_.GetStyleVersion(endpoint_params.style_name);
+            style_version = processing_manager_.render_manager().GetStyleVersion(endpoint_params.style_name);
         }
         request_info_str_ = MakeRequestInfoStr(*tile_request_, ext_str, style_version);
         is_internal_request_ = IsInternalRequest(*headers_, internal_port_);
@@ -346,7 +346,7 @@ void TileHandler::TryLoadFromCache() noexcept {
 
 void TileHandler::GenerateTile() noexcept {
     assert(tile_request_);
-    auto tile_task = std::make_shared<TileProcessor::TileTask>([this](Metatile&& metatile) {
+    auto tile_task = std::make_shared<TileProcessingManager::TileTask>([this](Metatile&& metatile) {
         pending_work_.reset();
         for (Tile& tile : metatile.tiles) {
             if (tile.id == tile_request_->tile_id) {
@@ -355,9 +355,9 @@ void TileHandler::GenerateTile() noexcept {
             }
         }
         SendError(500);
-    }, [this](TileProcessor::Error err) {
+    }, [this](TileProcessingManager::Error err) {
         pending_work_.reset();
-        if (err == TileProcessor::Error::not_found) {
+        if (err == TileProcessingManager::Error::not_found) {
             SendError(404);
         } else {
             SendError(500);
@@ -365,9 +365,9 @@ void TileHandler::GenerateTile() noexcept {
     }, true);
 
     pending_work_ = tile_task;
-    // TileProcessor is self destructable
-    TileProcessor* tile_processor = new TileProcessor(render_manager_);
-    tile_processor->GetMetatile(tile_request_, std::move(tile_task));
+    if (!processing_manager_.GetMetatile(tile_request_, std::move(tile_task))) {
+        SendError(503);
+    }
 }
 
 void TileHandler::LoadFromCacheOrError() {
@@ -407,12 +407,13 @@ void TileHandler::LockCacheAndGenerateTile() {
 
     // responce_task will be cancelled in case of connection timeout,
     // but tile_task will continue execution
-    auto response_task = std::make_shared<AsyncTask<std::string, TileProcessor::Error>>([this](std::string tile_data) {
+    auto response_task = std::make_shared<AsyncTask<std::string, TileProcessingManager::Error>>(
+                [this](std::string tile_data) {
         pending_work_.reset();
         SendResponse(std::move(tile_data));
-    }, [this](TileProcessor::Error err) {
+    }, [this](TileProcessingManager::Error err) {
         pending_work_.reset();
-        if (err == TileProcessor::Error::not_found) {
+        if (err == TileProcessingManager::Error::not_found) {
             SendError(404);
         } else {
             SendError(500);
@@ -421,7 +422,7 @@ void TileHandler::LockCacheAndGenerateTile() {
     pending_work_ = response_task;
 
     auto start_time = std::chrono::system_clock::now();
-    auto tile_task = std::make_shared<TileProcessor::TileTask>(
+    auto tile_task = std::make_shared<TileProcessingManager::TileTask>(
             [response_task, cacher_lock, cacher = cacher_, request_info_str = request_info_str_,
              endpoint_type = tile_request_->endpoint_params->type, tile_id = tile_request_->tile_id, start_time]
                 (Metatile&& metatile) {
@@ -452,19 +453,19 @@ void TileHandler::LockCacheAndGenerateTile() {
                          TTLPolicyToSeconds(cached_tile->policy), nullptr);
         }
         if (!response_sent) {
-            response_task->NotifyError(TileProcessor::Error::internal);
+            response_task->NotifyError(TileProcessingManager::Error::internal);
             cacher_lock->Unlock();
         } else {
             cacher_lock->Cancel();
         }
-    }, [response_task, cacher_lock](TileProcessor::Error err) {
+    }, [response_task, cacher_lock](TileProcessingManager::Error err) {
         response_task->NotifyError(err);
         cacher_lock->Unlock();
     }, false);
 
-    // TileProcessor is self destructable
-    TileProcessor* tile_processor = new TileProcessor(render_manager_);
-    tile_processor->GetMetatile(tile_request_, std::move(tile_task));
+    if (!processing_manager_.GetMetatile(tile_request_, std::move(tile_task))) {
+        SendError(503);
+    }
 }
 
 void TileHandler::ProxyToOtherNode(const folly::SocketAddress& addr) noexcept {

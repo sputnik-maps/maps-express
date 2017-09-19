@@ -12,9 +12,9 @@
 
 
 class NodesMonitor;
-class RenderManager;
 class TileCacher;
 class TileRequest;
+class TileProcessingManager;
 
 class TileHandler : public AsyncTaskHandler, public ProxyHandler::Callbacks {
 public:
@@ -37,7 +37,7 @@ public:
 
     explicit TileHandler(const std::string& internal_port,
                          folly::HHWheelTimer& timer,
-                         RenderManager& render_manager,
+                         TileProcessingManager& processing_manager,
                          std::shared_ptr<const endpoints_map_t> endpoints,
                          std::shared_ptr<TileCacher> cacher = nullptr,
                          NodesMonitor* nodes_monitor = nullptr);
@@ -67,7 +67,7 @@ private:
     std::shared_ptr<TileCacher> cacher_;
     std::unique_ptr<proxygen::HTTPMessage> headers_;
     folly::HHWheelTimer& timer_;
-    RenderManager& render_manager_;
+    TileProcessingManager& processing_manager_;
     ConnectionTimeoutCb connection_timeout_cb_;
     NodesMonitor* nodes_monitor_{nullptr};
     ProxyHandler* proxy_handler_{nullptr};

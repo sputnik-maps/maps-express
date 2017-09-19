@@ -2,20 +2,18 @@
 
 #include <folly/ThreadLocal.h>
 
-#include <proxygen/lib/http/HTTPMessage.h>
 #include <proxygen/httpserver/RequestHandlerFactory.h>
-#include <proxygen/httpserver/RequestHandler.h>
 
-#include "config.h"
 #include "data_manager.h"
 #include "endpoint.h"
-#include "nodes_monitor.h"
-#include "status_monitor.h"
 #include "rendermanager.h"
-#include "tile_cacher.h"
 
 
 class ServerUpdateObserver;
+class TileProcessingManager;
+class StatusMonitor;
+class TileCacher;
+class NodesMonitor;
 
 class HttpHandlerFactory : public proxygen::RequestHandlerFactory {
 public:
@@ -45,6 +43,7 @@ private:
     DataManager data_manager_;
     std::shared_ptr<endpoints_map_t> endpoints_;
     std::shared_ptr<TileCacher> cacher_;
+    std::unique_ptr<TileProcessingManager> processing_manager_;
     std::unique_ptr<ServerUpdateObserver> update_observer_;
     folly::ThreadLocal<TimerWrapper> timer_;
     std::string internal_port_;
